@@ -1,0 +1,718 @@
+// Main page application logic.
+(function () {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const store = window.BPPX.storage;
+  const ai = window.BPPX.ai;
+  const tex = window.BPPX.latex;
+
+  // ----- state -----
+  let project = store.emptyProject();
+  let projectId = store.lastProjectId();
+  let genAbort = null;
+
+  function toast(msg, kind = "") {
+    const t = $("#toast");
+    t.textContent = msg;
+    t.className = "toast show " + kind;
+    setTimeout(() => (t.className = "toast"), 2600);
+  }
+
+  // ----- tab switching -----
+  $$(".tab").forEach((b) =>
+    b.addEventListener("click", () => {
+      $$(".tab").forEach((x) => x.classList.remove("active"));
+      $$(".panel").forEach((x) => x.classList.remove("active"));
+      b.classList.add("active");
+      $(`.panel[data-panel="${b.dataset.tab}"]`).classList.add("active");
+      if (b.dataset.tab === "template") renderTemplate();
+      if (b.dataset.tab === "proof") refreshProofSection();
+      if (b.dataset.tab === "export") refreshExportPickers();
+    })
+  );
+
+  // ----- reference tabs -----
+  $$(".ref-tab").forEach((b) =>
+    b.addEventListener("click", () => {
+      $$(".ref-tab").forEach((x) => x.classList.remove("active"));
+      b.classList.add("active");
+      const k = b.dataset.ref;
+      $("#refText").style.display = k === "text" ? "" : "none";
+      $("#refPdf").style.display = k === "pdf" ? "" : "none";
+      $("#refUrl").style.display = k === "url" ? "" : "none";
+    })
+  );
+
+  // ----- project I/O -----
+  if (projectId) $("#projectId").value = projectId;
+
+  $("#loadProject").addEventListener("click", async () => {
+    const id = $("#projectId").value.trim();
+    if (!id) return toast("请输入项目 ID", "err");
+    projectId = id;
+    const settings = store.loadSettings();
+    const localP = store.loadLocalProject(id);
+    let remoteP = null;
+    try {
+      remoteP = await store.fetchRemoteProject(id, settings.shareToken);
+    } catch (e) {
+      toast("远端加载失败：" + e.message + "（仅使用本地）", "err");
+    }
+    const merged = store.pickNewer(remoteP, localP);
+    if (!merged) {
+      project = store.emptyProject();
+      toast("新建项目：" + id, "ok");
+    } else {
+      project = { ...store.emptyProject(), ...merged };
+      toast("已载入：" + id, "ok");
+    }
+    bindToUI();
+  });
+
+  $("#saveProject").addEventListener("click", async () => {
+    const id = $("#projectId").value.trim();
+    if (!id) return toast("请输入项目 ID", "err");
+    projectId = id;
+    pullFromUI();
+    store.saveLocalProject(id, project);
+    const settings = store.loadSettings();
+    try {
+      await store.pushRemoteProject(id, settings.shareToken, project);
+      toast("已保存（本地+云端）", "ok");
+    } catch (e) {
+      toast("已保存本地。云端失败：" + e.message, "err");
+    }
+  });
+
+  function bindToUI() {
+    $("#bookTitle").value = project.title || "";
+    $("#bookAuthor").value = project.author || "";
+    $("#bookLevel").value = project.level || "高中";
+    $("#bookOutline").value = project.outline || "";
+    $("#refText").value = project.refText || "";
+    $("#refSummary").value = project.refSummary || "";
+
+    const t = project.template;
+    $("#tplDocClass").value = t.docClass;
+    $("#tplOpts").value = t.opts;
+    $("#tplFont").value = t.font;
+    $("#tplPkgs").value = t.pkgs;
+    $("#tplTheorems").value = t.theorems;
+    $("#tplExtra").value = t.extra;
+
+    renderSections();
+    renderTemplate();
+    refreshProofSection();
+    refreshExportPickers();
+  }
+
+  function pullFromUI() {
+    project.title = $("#bookTitle").value;
+    project.author = $("#bookAuthor").value;
+    project.level = $("#bookLevel").value;
+    project.outline = $("#bookOutline").value;
+    project.refText = $("#refText").value;
+    project.refSummary = $("#refSummary").value;
+    Object.assign(project.template, {
+      docClass: $("#tplDocClass").value,
+      opts: $("#tplOpts").value,
+      font: $("#tplFont").value,
+      pkgs: $("#tplPkgs").value,
+      theorems: $("#tplTheorems").value,
+      extra: $("#tplExtra").value,
+    });
+    // Sections are pulled live by inputs themselves.
+  }
+
+  // ----- reference parsing -----
+  $("#parseRef").addEventListener("click", async () => {
+    const status = $("#parseStatus");
+    const active = $(".ref-tab.active").dataset.ref;
+    let kind = active,
+      payload;
+    if (active === "text") payload = $("#refText").value.trim();
+    else if (active === "url") payload = $("#refUrl").value.trim();
+    else if (active === "pdf") {
+      const f = $("#refPdf").files[0];
+      if (!f) return toast("请先选择 PDF 文件", "err");
+      payload = await fileToBase64(f);
+    }
+    if (!payload) return toast("参考内容为空", "err");
+
+    const settings = store.loadSettings();
+    const provider = settings.parse || settings.write;
+    if (!provider) return toast("请先到设置选择「解析」提供商", "err");
+    status.textContent = "AI 解析中...";
+    try {
+      const res = await ai.parseRef({ provider, kind, payload });
+      $("#refSummary").value = res.content || JSON.stringify(res, null, 2);
+      status.textContent = "✓ 解析完成";
+      pullFromUI();
+    } catch (e) {
+      status.textContent = "✗ " + e.message;
+      toast("解析失败：" + e.message, "err");
+    }
+  });
+
+  function fileToBase64(f) {
+    return new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(String(fr.result).split(",")[1] || "");
+      fr.onerror = rej;
+      fr.readAsDataURL(f);
+    });
+  }
+
+  // ----- section rendering & manipulation -----
+  function renderSections() {
+    const list = $("#sectionList");
+    list.innerHTML = "";
+    (project.sections || []).forEach((s, i) => list.appendChild(sectionEl(s, i)));
+  }
+  function sectionEl(s, idx) {
+    const root = document.createElement("div");
+    root.className = "section-item";
+    root.innerHTML = `
+      <div class="section-head">
+        <input class="s-title" value="${escapeHtml(s.title || "")}" placeholder="第X章 名/小节名" />
+        <span class="section-meta">#${idx + 1}</span>
+        <div class="section-actions">
+          <button class="btn s-regen">重生成</button>
+          <button class="btn s-up">↑</button>
+          <button class="btn s-down">↓</button>
+          <button class="btn s-toggle">折叠</button>
+          <button class="btn btn-danger s-del">删除</button>
+        </div>
+      </div>
+      <div class="section-body">
+        <label>知识讲解
+          <textarea class="s-know" rows="6">${escapeHtml(s.knowledge || "")}</textarea>
+        </label>
+        <label>例题（每个例题块：题干 / 解 各一段，多题用 <hr> 分隔的标记 <code>%%EX%%</code> 切分）
+          <textarea class="s-ex" rows="8">${escapeHtml(serializeQA(s.examples, "sol"))}</textarea>
+        </label>
+        <label>习题（同上，分隔标记 <code>%%EX%%</code>，每题 题/答 两段）
+          <textarea class="s-exc" rows="8">${escapeHtml(serializeQA(s.exercises, "a"))}</textarea>
+        </label>
+      </div>`;
+    const set = (sel, fn) =>
+      root.querySelector(sel).addEventListener("input", () => {
+        fn();
+        // No autosave — user clicks 保存 explicitly.
+      });
+    set(".s-title", () => (s.title = root.querySelector(".s-title").value));
+    set(".s-know", () => (s.knowledge = root.querySelector(".s-know").value));
+    set(".s-ex", () =>
+      (s.examples = deserializeQA(root.querySelector(".s-ex").value, "sol"))
+    );
+    set(".s-exc", () =>
+      (s.exercises = deserializeQA(root.querySelector(".s-exc").value, "a"))
+    );
+    root.querySelector(".s-del").addEventListener("click", () => {
+      if (!confirm("删除本节？")) return;
+      project.sections.splice(idx, 1);
+      renderSections();
+    });
+    root.querySelector(".s-up").addEventListener("click", () => {
+      if (idx === 0) return;
+      const [m] = project.sections.splice(idx, 1);
+      project.sections.splice(idx - 1, 0, m);
+      renderSections();
+    });
+    root.querySelector(".s-down").addEventListener("click", () => {
+      if (idx >= project.sections.length - 1) return;
+      const [m] = project.sections.splice(idx, 1);
+      project.sections.splice(idx + 1, 0, m);
+      renderSections();
+    });
+    root.querySelector(".s-toggle").addEventListener("click", () =>
+      root.classList.toggle("collapsed")
+    );
+    root.querySelector(".s-regen").addEventListener("click", () =>
+      generateSection(idx)
+    );
+    return root;
+  }
+  function serializeQA(arr, ansKey) {
+    if (!arr || !arr.length) return "";
+    return arr
+      .map(
+        (x) =>
+          (x.q || "").trim() +
+          "\n%%ANS%%\n" +
+          ((x[ansKey] || "").trim())
+      )
+      .join("\n%%EX%%\n");
+  }
+  function deserializeQA(text, ansKey) {
+    if (!text || !text.trim()) return [];
+    return text.split(/%%EX%%/).map((chunk) => {
+      const parts = chunk.split(/%%ANS%%/);
+      const obj = { q: (parts[0] || "").trim() };
+      obj[ansKey] = (parts[1] || "").trim();
+      return obj;
+    });
+  }
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  $("#addSection").addEventListener("click", () => {
+    project.sections.push({
+      title: "",
+      knowledge: "",
+      examples: [],
+      exercises: [],
+    });
+    renderSections();
+  });
+  $("#clearSections").addEventListener("click", () => {
+    if (!confirm("清空所有章节？")) return;
+    project.sections = [];
+    renderSections();
+  });
+
+  // ----- generation -----
+  $("#genAll").addEventListener("click", async () => {
+    pullFromUI();
+    const settings = store.loadSettings();
+    const provider = settings.write;
+    if (!provider) return toast("请先到设置选择「写作」提供商", "err");
+
+    const lines = $("#bookOutline")
+      .value.split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (!lines.length) return toast("请填写章节大纲", "err");
+
+    // Ensure section entries exist for each outline line.
+    project.sections = lines.map((l) => {
+      const existing = (project.sections || []).find((s) => s.title === l);
+      return (
+        existing || {
+          title: l,
+          knowledge: "",
+          examples: [],
+          exercises: [],
+        }
+      );
+    });
+    renderSections();
+
+    const total = project.sections.length;
+    const prog = $("#genProg");
+    prog.max = total;
+    prog.value = 0;
+    $("#genStop").disabled = false;
+    $("#genAll").disabled = true;
+    genAbort = false;
+
+    const concurrency = Math.max(1, Number(settings.concurrency || 2));
+    let cursor = 0;
+    async function worker() {
+      while (!genAbort && cursor < total) {
+        const i = cursor++;
+        $("#genStatus").textContent =
+          "生成第 " + (i + 1) + "/" + total + " 节：" + project.sections[i].title;
+        try {
+          await generateSection(i);
+        } catch (e) {
+          toast("第 " + (i + 1) + " 节失败：" + e.message, "err");
+        }
+        prog.value = Math.max(prog.value, i + 1);
+      }
+    }
+    const workers = Array.from({ length: concurrency }, worker);
+    await Promise.all(workers);
+    $("#genStop").disabled = true;
+    $("#genAll").disabled = false;
+    $("#genStatus").textContent = genAbort ? "已停止。" : "✓ 全部生成完成。";
+    renderSections();
+  });
+
+  $("#genStop").addEventListener("click", () => {
+    genAbort = true;
+  });
+
+  async function generateSection(idx) {
+    pullFromUI();
+    const settings = store.loadSettings();
+    const provider = settings.write;
+    if (!provider) throw new Error("未选择写作提供商");
+    const s = project.sections[idx];
+    const unit = $("#genUnit").value;
+    const words = $("#genWords").value;
+    const sys = settings.sysWrite || "";
+    const user = buildGenPrompt(s, unit, words);
+    const r = await ai.generate({
+      provider,
+      system: sys,
+      user,
+      max_tokens: 0,
+      temperature: 0,
+    });
+    const content = (r && r.content) || "";
+    applyGenResult(s, content, unit);
+    renderSections();
+  }
+
+  function buildGenPrompt(section, unit, words) {
+    const parts = [];
+    parts.push("书名：" + (project.title || "未命名"));
+    parts.push("读者层次：" + (project.level || ""));
+    parts.push("本节标题：" + (section.title || ""));
+    if (project.refSummary)
+      parts.push(
+        "\n参考资料摘要（请在此基础上写作，但不要直接抄袭）：\n" +
+          project.refSummary.slice(0, 6000)
+      );
+    parts.push(
+      "\n请输出 LaTeX 代码片段（不要 \\documentclass，不要 \\begin{document}）。"
+    );
+    parts.push("约 " + words + " 字。");
+    parts.push(
+      "请使用以下机器可读分节标记：\n" +
+        "[[KNOWLEDGE]]\n知识讲解 LaTeX...\n" +
+        "[[EXAMPLES]]\n例题 1：\\begin{example}...\\end{example}\\begin{solution}...\\end{solution}\n%%EX%%\n例题 2：...\n" +
+        "[[EXERCISES]]\n习题 1：\\begin{exercise}...\\end{exercise}\\begin{solution}...\\end{solution}\n%%EX%%\n..."
+    );
+    if (unit === "knowledge")
+      parts.push("仅输出 [[KNOWLEDGE]] 段，其它段保留空。");
+    else if (unit === "example")
+      parts.push("仅输出 [[EXAMPLES]]，3-5 题，每题含详细解析。");
+    else if (unit === "exercise")
+      parts.push("仅输出 [[EXERCISES]]，4-6 题，含完整答案。");
+    else
+      parts.push(
+        "三段都要：知识讲解、2-4 道例题（含解析）、3-5 道习题（含答案）。"
+      );
+    return parts.join("\n");
+  }
+
+  function applyGenResult(section, content, unit) {
+    const know = pickBlock(content, "KNOWLEDGE");
+    const exs = pickBlock(content, "EXAMPLES");
+    const xrs = pickBlock(content, "EXERCISES");
+    if (unit === "knowledge" || unit === "all")
+      if (know) section.knowledge = know;
+    if (unit === "example" || unit === "all")
+      if (exs) section.examples = parseGenBlocks(exs, "example", "sol");
+    if (unit === "exercise" || unit === "all")
+      if (xrs) section.exercises = parseGenBlocks(xrs, "exercise", "a");
+    // Fallback: nothing matched — dump as knowledge.
+    if (!know && !exs && !xrs && content.trim()) {
+      section.knowledge = content.trim();
+    }
+  }
+
+  function pickBlock(text, tag) {
+    const re = new RegExp(
+      "\\[\\[" + tag + "\\]\\]([\\s\\S]*?)(?=\\[\\[[A-Z]+\\]\\]|$)"
+    );
+    const m = text.match(re);
+    return m ? m[1].trim() : "";
+  }
+  function parseGenBlocks(blob, envName, ansKey) {
+    const chunks = blob.split(/%%EX%%/);
+    return chunks
+      .map((c) => {
+        const qm = c.match(
+          new RegExp(
+            "\\\\begin\\s*\\{" + envName + "\\}([\\s\\S]*?)\\\\end\\s*\\{" + envName + "\\}"
+          )
+        );
+        const sm = c.match(
+          /\\begin\s*\{solution\}([\s\S]*?)\\end\s*\{solution\}/
+        );
+        const o = { q: qm ? qm[1].trim() : c.trim() };
+        o[ansKey] = sm ? sm[1].trim() : "";
+        return o;
+      })
+      .filter((x) => x.q);
+  }
+
+  // ----- template tab -----
+  function renderTemplate() {
+    const t = project.template;
+    const pre = tex.buildPreamble({
+      docClass: $("#tplDocClass").value,
+      opts: $("#tplOpts").value,
+      font: $("#tplFont").value,
+      pkgs: $("#tplPkgs").value,
+      theorems: $("#tplTheorems").value,
+      extra: $("#tplExtra").value,
+    });
+    $("#tplPreview").textContent = pre;
+  }
+  ["tplDocClass", "tplOpts", "tplFont", "tplPkgs", "tplTheorems", "tplExtra"].forEach(
+    (id) => $("#" + id).addEventListener("input", renderTemplate)
+  );
+  $("#tplSave").addEventListener("click", () => {
+    pullFromUI();
+    toast("已保存（点击右上『保存』以持久化）", "ok");
+  });
+  $("#tplReset").addEventListener("click", () => {
+    if (!confirm("重置为默认模板？")) return;
+    project.template = store.emptyProject().template;
+    bindToUI();
+  });
+
+  // ----- merge tab -----
+  let mergedTex = "";
+  $("#mergeFiles").addEventListener("change", async (e) => {
+    const files = Array.from(e.target.files || []);
+    const list = $("#mergeList");
+    list.innerHTML = "";
+    const items = [];
+    for (const f of files) {
+      const text = await f.text();
+      items.push({ name: f.name, content: text });
+      const row = document.createElement("div");
+      row.className = "merge-item";
+      row.innerHTML = `<span class="fname">${escapeHtml(f.name)}</span><span class="muted">${text.length} chars</span>`;
+      list.appendChild(row);
+    }
+    list.dataset.files = JSON.stringify(items);
+  });
+  $("#mergeRun").addEventListener("click", () => {
+    pullFromUI();
+    const items = JSON.parse($("#mergeList").dataset.files || "[]");
+    if (!items.length) return toast("请先选择 .tex 文件", "err");
+    mergedTex = tex.mergeFiles(items, project.template, {
+      title: project.title,
+      author: project.author,
+      headingLevel: "chapter",
+    });
+    $("#mergeResult").value = mergedTex;
+    $("#mergeDownload").disabled = false;
+    toast("合并完成", "ok");
+  });
+  $("#mergeDownload").addEventListener("click", () =>
+    download((project.title || "book") + "_merged.tex", mergedTex)
+  );
+
+  // ----- proofread -----
+  function refreshProofSection() {
+    const sel = $("#proofSection");
+    sel.innerHTML = "";
+    sel.appendChild(new Option("— 全书 —", "*"));
+    project.sections.forEach((s, i) =>
+      sel.appendChild(new Option(`${i + 1}. ${s.title || "(未命名)"}`, String(i)))
+    );
+  }
+  $("#proofRun").addEventListener("click", async () => {
+    pullFromUI();
+    const settings = store.loadSettings();
+    const providers = settings.proof || [];
+    if (!providers.length) return toast("请先到设置选择校对提供商", "err");
+    const targets = $$(".proof-target:checked").map((c) => c.value);
+    if (!targets.length) return toast("至少选一项校对目标", "err");
+    const which = $("#proofSection").value;
+    const sections =
+      which === "*" ? project.sections : [project.sections[Number(which)]];
+    const container = $("#proofResults");
+    container.innerHTML = "";
+
+    for (const [si, s] of sections.entries()) {
+      if (!s) continue;
+      const block = document.createElement("div");
+      block.className = "proof-block";
+      block.innerHTML = `<h4>第 ${(which === "*" ? si : Number(which)) + 1} 节：${escapeHtml(s.title || "")}</h4>`;
+      container.appendChild(block);
+      const latexBits = [];
+      if (targets.includes("knowledge") && s.knowledge)
+        latexBits.push("% 知识讲解\n" + s.knowledge);
+      if (targets.includes("example"))
+        for (const ex of s.examples || [])
+          latexBits.push(
+            "\\begin{example}\n" +
+              ex.q +
+              "\n\\end{example}\n\\begin{solution}\n" +
+              (ex.sol || "") +
+              "\n\\end{solution}"
+          );
+      if (targets.includes("exercise"))
+        for (const ex of s.exercises || [])
+          latexBits.push(
+            "\\begin{exercise}\n" +
+              ex.q +
+              "\n\\end{exercise}\n\\begin{solution}\n" +
+              (ex.a || "") +
+              "\n\\end{solution}"
+          );
+      const latex = latexBits.join("\n\n");
+      for (const pname of providers) {
+        const pblock = document.createElement("div");
+        pblock.innerHTML = `<strong>${escapeHtml(pname)}</strong> <span class="muted small">校对中...</span>`;
+        block.appendChild(pblock);
+        try {
+          const res = await ai.proofread({
+            provider: pname,
+            system: settings.sysProof || "",
+            latex,
+            targets,
+          });
+          const suggestions = parseProofResponse(res.content || "");
+          pblock.innerHTML = `<strong>${escapeHtml(pname)}</strong> <span class="muted small">${suggestions.length} 条建议</span>`;
+          suggestions.forEach((sug) =>
+            pblock.appendChild(renderSuggestion(sug, s))
+          );
+        } catch (e) {
+          pblock.innerHTML = `<strong>${escapeHtml(pname)}</strong> <span class="muted small">✗ ${escapeHtml(e.message)}</span>`;
+        }
+      }
+    }
+  });
+
+  function parseProofResponse(content) {
+    // Try to extract JSON array even if wrapped in ```json ... ```.
+    let s = content.trim();
+    const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fence) s = fence[1].trim();
+    try {
+      const arr = JSON.parse(s);
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      // Fallback: split lines into pseudo-suggestions
+      return s
+        .split(/\n\s*\n/)
+        .filter(Boolean)
+        .map((t) => ({ issue: t, suggestion: "", patch: "" }));
+    }
+  }
+
+  function renderSuggestion(sug, section) {
+    const div = document.createElement("div");
+    div.className = "proof-suggestion";
+    div.innerHTML = `
+      <div class="loc">${escapeHtml(sug.location || "")}</div>
+      <div class="issue">⚠ ${escapeHtml(sug.issue || "")}</div>
+      <div class="sugg">💡 ${escapeHtml(sug.suggestion || "")}</div>
+      ${
+        sug.patch
+          ? `<pre>${escapeHtml(sug.patch)}</pre>`
+          : ""
+      }
+      <div class="actions">
+        ${
+          sug.patch
+            ? `<button class="btn btn-primary s-accept">接受建议（追加到知识讲解末尾）</button>
+               <button class="btn s-replace">替换知识讲解</button>`
+            : ""
+        }
+        <button class="btn s-dismiss">忽略</button>
+      </div>`;
+    const accept = div.querySelector(".s-accept");
+    if (accept)
+      accept.addEventListener("click", () => {
+        section.knowledge = (section.knowledge || "") + "\n\n% [AI 建议]\n" + sug.patch;
+        renderSections();
+        toast("已追加建议", "ok");
+      });
+    const rep = div.querySelector(".s-replace");
+    if (rep)
+      rep.addEventListener("click", () => {
+        if (!confirm("用建议替换整段知识讲解？")) return;
+        section.knowledge = sug.patch;
+        renderSections();
+        toast("已替换", "ok");
+      });
+    div.querySelector(".s-dismiss").addEventListener("click", () => div.remove());
+    return div;
+  }
+
+  // ----- export -----
+  function refreshExportPickers() {
+    const sec = $("#singleSection");
+    sec.innerHTML = "";
+    project.sections.forEach((s, i) =>
+      sec.appendChild(new Option(`${i + 1}. ${s.title || ""}`, String(i)))
+    );
+    refreshSingleItems();
+  }
+  function refreshSingleItems() {
+    const idx = Number($("#singleSection").value || 0);
+    const s = project.sections[idx];
+    const item = $("#singleItem");
+    item.innerHTML = "";
+    if (!s) return;
+    (s.examples || []).forEach((ex, i) =>
+      item.appendChild(
+        new Option(
+          "例题 " + (i + 1) + ": " + (ex.q || "").slice(0, 30),
+          "example:" + i
+        )
+      )
+    );
+    (s.exercises || []).forEach((ex, i) =>
+      item.appendChild(
+        new Option(
+          "习题 " + (i + 1) + ": " + (ex.q || "").slice(0, 30),
+          "exercise:" + i
+        )
+      )
+    );
+  }
+  $("#singleSection").addEventListener("change", refreshSingleItems);
+  $$('input[name="exMode"]').forEach((r) =>
+    r.addEventListener("change", () => {
+      $("#singlePicker").style.display = $(
+        'input[name="exMode"]:checked'
+      ).value === "single"
+        ? ""
+        : "none";
+    })
+  );
+  $("#exBuild").addEventListener("click", () => {
+    pullFromUI();
+    const mode = $('input[name="exMode"]:checked').value;
+    let out = "";
+    if (mode === "full") out = tex.buildFull(project);
+    else if (mode === "body") out = tex.buildBodyOnly(project);
+    else if (mode === "preamble") out = tex.buildPreamble(project.template);
+    else if (mode === "single") {
+      const sIdx = Number($("#singleSection").value || 0);
+      const key = $("#singleItem").value;
+      out = tex.buildSingle(project, sIdx, key);
+    }
+    $("#exOut").value = out;
+  });
+  $("#exDownload").addEventListener("click", () => {
+    const out = $("#exOut").value;
+    if (!out) return toast("请先生成", "err");
+    const mode = $('input[name="exMode"]:checked').value;
+    const name = (project.title || "book") + "_" + mode + ".tex";
+    download(name, out);
+  });
+  $("#exCopy").addEventListener("click", async () => {
+    const out = $("#exOut").value;
+    if (!out) return;
+    try {
+      await navigator.clipboard.writeText(out);
+      toast("已复制到剪贴板", "ok");
+    } catch {
+      $("#exOut").select();
+      document.execCommand("copy");
+      toast("已复制", "ok");
+    }
+  });
+
+  function download(name, content) {
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
+  // ----- init -----
+  if (projectId) {
+    const local = store.loadLocalProject(projectId);
+    if (local) project = { ...store.emptyProject(), ...local };
+  }
+  bindToUI();
+})();

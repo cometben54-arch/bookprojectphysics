@@ -1,0 +1,16 @@
+name = "bookprojectphysics"
+compatibility_date = "2024-09-01"
+pages_build_output_dir = "."
+
+# Cloudflare KV namespace for shared project storage
+# Create with: wrangler kv:namespace create BOOK_KV
+# Then put the id below and run `wrangler pages project create ...`
+[[kv_namespaces]]
+binding = "BOOK_KV"
+id = "REPLACE_WITH_REAL_KV_ID"
+
+# Optional: D1 binding for future structured data
+# [[d1_databases]]
+# binding = "BOOK_DB"
+# database_name = "bookprojectphysics"
+# database_id = "REPLACE_WITH_REAL_D1_ID"

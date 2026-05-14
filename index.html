@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>LaTeX 写书协作平台</title>
+<link rel="stylesheet" href="/assets/css/style.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">TeX</span>
+    <h1>LaTeX 写书协作平台</h1>
+  </div>
+  <div class="topbar-right">
+    <input id="projectId" class="proj-input" placeholder="项目 ID（多人共享同一 ID）" />
+    <button id="loadProject" class="btn">载入</button>
+    <button id="saveProject" class="btn btn-primary">保存</button>
+    <a class="icon-btn" href="/settings.html" title="后台设置">⚙</a>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="write">写作</button>
+  <button class="tab" data-tab="template">模板</button>
+  <button class="tab" data-tab="merge">合并</button>
+  <button class="tab" data-tab="proof">校对</button>
+  <button class="tab" data-tab="export">导出</button>
+</nav>
+
+<main>
+  <!-- ============== 写作 ============== -->
+  <section class="panel active" data-panel="write">
+    <div class="grid-2">
+      <div class="card">
+        <h3>1. 参考资料</h3>
+        <div class="ref-tabs">
+          <button class="ref-tab active" data-ref="text">文本</button>
+          <button class="ref-tab" data-ref="pdf">PDF</button>
+          <button class="ref-tab" data-ref="url">链接</button>
+        </div>
+        <textarea id="refText" rows="10" placeholder="粘贴参考文本（教材内容、知识点、例题等）..."></textarea>
+        <input id="refPdf" type="file" accept="application/pdf" style="display:none" />
+        <input id="refUrl" type="url" placeholder="https://..." style="display:none" />
+        <div class="row">
+          <button id="parseRef" class="btn">AI 解析参考资料</button>
+          <span id="parseStatus" class="muted"></span>
+        </div>
+        <details>
+          <summary>解析结果 / 摘要</summary>
+          <textarea id="refSummary" rows="6" placeholder="AI 解析后的结构化摘要会出现在此处，可手动编辑..."></textarea>
+        </details>
+      </div>
+
+      <div class="card">
+        <h3>2. 生成计划</h3>
+        <label>书名 <input id="bookTitle" placeholder="例：高中物理力学专题" /></label>
+        <label>作者 <input id="bookAuthor" placeholder="作者署名" /></label>
+        <label>目标读者 / 难度
+          <select id="bookLevel">
+            <option>初中</option><option selected>高中</option>
+            <option>大学物理（普物）</option><option>竞赛 / 自招</option>
+          </select>
+        </label>
+        <label>章节大纲（每行一条；用 / 分隔章/节）
+          <textarea id="bookOutline" rows="8" placeholder="第1章 运动学/匀变速直线运动&#10;第1章 运动学/自由落体&#10;第2章 牛顿运动定律/牛顿三定律&#10;..."></textarea>
+        </label>
+        <label>每节生成单元
+          <select id="genUnit">
+            <option value="all">知识讲解 + 例题 + 习题</option>
+            <option value="knowledge">仅知识讲解</option>
+            <option value="example">仅例题与解析</option>
+            <option value="exercise">仅习题与答案</option>
+          </select>
+        </label>
+        <label>每节大致字数
+          <input id="genWords" type="number" value="800" min="200" max="5000" />
+        </label>
+        <div class="row">
+          <button id="genAll" class="btn btn-primary">分批生成全书</button>
+          <button id="genStop" class="btn" disabled>停止</button>
+        </div>
+        <progress id="genProg" max="100" value="0"></progress>
+        <div id="genStatus" class="muted small"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>3. 生成结果（按节切分，可逐节编辑）</h3>
+      <div class="toolbar">
+        <button id="addSection" class="btn">+ 新增章节</button>
+        <button id="clearSections" class="btn btn-danger">清空</button>
+        <span class="muted small">提示：每节是独立 LaTeX 片段，导出时会按顺序拼接。</span>
+      </div>
+      <div id="sectionList" class="section-list"></div>
+    </div>
+  </section>
+
+  <!-- ============== 模板 ============== -->
+  <section class="panel" data-panel="template">
+    <div class="grid-2">
+      <div class="card">
+        <h3>图书全局模板设置</h3>
+        <label>文档类
+          <select id="tplDocClass">
+            <option value="ctexbook">ctexbook（中文书籍，推荐）</option>
+            <option value="ctexart">ctexart（中文文章）</option>
+            <option value="book">book（英文书籍）</option>
+            <option value="article">article（英文文章）</option>
+          </select>
+        </label>
+        <label>纸张 / 字号
+          <input id="tplOpts" value="UTF8,a4paper,11pt,oneside" />
+        </label>
+        <label>主字体（XeLaTeX 可用）
+          <input id="tplFont" value="Times New Roman" />
+        </label>
+        <label>启用宏包（逗号分隔）
+          <input id="tplPkgs" value="amsmath,amssymb,amsthm,physics,siunitx,graphicx,xcolor,hyperref,enumitem,booktabs,tikz,pgfplots" />
+        </label>
+        <label>定理 / 例题环境
+          <textarea id="tplTheorems" rows="6">\newtheorem{example}{例题}[section]
+\newtheorem{exercise}{习题}[section]
+\theoremstyle{remark}
+\newtheorem*{solution}{解}
+\newtheorem*{note}{注}</textarea>
+        </label>
+        <label>自定义 preamble 追加
+          <textarea id="tplExtra" rows="6" placeholder="\usepackage{...} 或自定义命令、颜色定义等"></textarea>
+        </label>
+        <div class="row">
+          <button id="tplSave" class="btn btn-primary">保存模板</button>
+          <button id="tplReset" class="btn">重置默认</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>预览 preamble</h3>
+        <pre id="tplPreview" class="code"></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== 合并 ============== -->
+  <section class="panel" data-panel="merge">
+    <div class="card">
+      <h3>多 .tex 文件合并</h3>
+      <p class="muted small">上传多个 .tex 文件，系统会去掉每个文件的 documentclass / preamble，仅保留 \begin{document}...\end{document} 内部内容，统一套用当前模板，输出一个可编译的 .tex 文件。</p>
+      <input id="mergeFiles" type="file" multiple accept=".tex,text/x-tex,text/plain" />
+      <div id="mergeList" class="merge-list"></div>
+      <div class="row">
+        <button id="mergeRun" class="btn btn-primary">合并为一本书</button>
+        <button id="mergeDownload" class="btn" disabled>下载合并结果</button>
+      </div>
+      <textarea id="mergeResult" rows="18" placeholder="合并结果将显示在此处..."></textarea>
+    </div>
+  </section>
+
+  <!-- ============== 校对 ============== -->
+  <section class="panel" data-panel="proof">
+    <div class="card">
+      <h3>多 AI 校对</h3>
+      <p class="muted small">选择一节或多节内容，使用多个不同 AI 提供商对知识讲解、例题解析、习题答案给出改进建议。可逐条接受、修改或忽略。</p>
+      <div class="row">
+        <label class="inline"><input type="checkbox" class="proof-target" value="knowledge" checked /> 知识讲解</label>
+        <label class="inline"><input type="checkbox" class="proof-target" value="example" checked /> 例题解析</label>
+        <label class="inline"><input type="checkbox" class="proof-target" value="exercise" checked /> 习题答案</label>
+      </div>
+      <div class="row">
+        <select id="proofSection" class="grow"></select>
+        <button id="proofRun" class="btn btn-primary">开始校对</button>
+      </div>
+      <div id="proofResults" class="proof-results"></div>
+    </div>
+  </section>
+
+  <!-- ============== 导出 ============== -->
+  <section class="panel" data-panel="export">
+    <div class="card">
+      <h3>LaTeX 输出</h3>
+      <div class="row">
+        <label class="inline"><input type="radio" name="exMode" value="full" checked /> 完整书（preamble + document）</label>
+        <label class="inline"><input type="radio" name="exMode" value="body" /> 仅 document 内部</label>
+        <label class="inline"><input type="radio" name="exMode" value="preamble" /> 仅 preamble</label>
+        <label class="inline"><input type="radio" name="exMode" value="single" /> 单题（例题/习题）</label>
+      </div>
+      <div id="singlePicker" class="row" style="display:none">
+        <select id="singleSection" class="grow"></select>
+        <select id="singleItem" class="grow"></select>
+      </div>
+      <div class="row">
+        <button id="exBuild" class="btn btn-primary">生成 LaTeX</button>
+        <button id="exDownload" class="btn">下载 .tex</button>
+        <button id="exCopy" class="btn">复制</button>
+      </div>
+      <textarea id="exOut" rows="24" placeholder="点击生成 LaTeX，输出会在此处。"></textarea>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script src="/assets/js/storage.js"></script>
+<script src="/assets/js/ai-client.js"></script>
+<script src="/assets/js/latex.js"></script>
+<script src="/assets/js/app.js"></script>
+</body>
+</html>

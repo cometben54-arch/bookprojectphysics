@@ -1,0 +1,13 @@
+{
+  "name": "bookprojectphysics",
+  "version": "0.1.0",
+  "description": "A collaborative LaTeX book writing platform powered by AI, deployable on Cloudflare Pages.",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler pages dev . --compatibility-date=2024-09-01 --kv BOOK_KV",
+    "deploy": "wrangler pages deploy ."
+  },
+  "devDependencies": {
+    "wrangler": "^3.80.0"
+  }
+}

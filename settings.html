@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>后台设置 - LaTeX 写书协作平台</title>
+<link rel="stylesheet" href="/assets/css/style.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">⚙</span>
+    <h1>后台设置</h1>
+  </div>
+  <div class="topbar-right">
+    <a class="btn" href="/">← 返回主页</a>
+  </div>
+</header>
+
+<main class="settings-main">
+  <section class="card">
+    <h3>AI 服务提供商</h3>
+    <p class="muted small">在此添加一个或多个 AI 提供商（OpenAI / Anthropic / DeepSeek / 任意 OpenAI 兼容接口）。所有调用通过本站 Pages Functions 代理，避免在前端暴露 Key。Key 存放在 Cloudflare KV（若已配置 BOOK_KV）或浏览器 localStorage。</p>
+    <div id="providerList" class="provider-list"></div>
+    <div class="row">
+      <button id="addProvider" class="btn btn-primary">+ 添加提供商</button>
+      <button id="testAll" class="btn">连通性测试（全部）</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h3>默认调用配置</h3>
+    <div class="grid-2">
+      <label>写作（生成）使用提供商
+        <select id="defWrite"></select>
+      </label>
+      <label>解析参考资料使用提供商
+        <select id="defParse"></select>
+      </label>
+      <label>校对默认使用（可多选，按住 Ctrl）
+        <select id="defProof" multiple size="5"></select>
+      </label>
+      <label>请求超时（秒）
+        <input id="defTimeout" type="number" min="10" max="600" value="120" />
+      </label>
+      <label>最大并发
+        <input id="defConcurrency" type="number" min="1" max="10" value="2" />
+      </label>
+      <label>系统提示词（写作）
+        <textarea id="defSysWrite" rows="5">你是一位资深的物理教材编辑与中学物理教师，擅长用清晰、严谨、循序渐进的语言撰写中文物理教辅。输出必须是有效的 LaTeX 代码片段，使用 amsmath / physics 等宏包，公式使用 \[...\] 或 align 环境，例题环境为 \begin{example}...\end{example}，解使用 \begin{solution}...\end{solution}，习题为 \begin{exercise}...\end{exercise}。不要输出 \documentclass 或 \begin{document}。</textarea>
+      </label>
+      <label>系统提示词（校对）
+        <textarea id="defSysProof" rows="5">你是一位严格的物理教材审稿人。请检查给定 LaTeX 片段中的物理概念准确性、公式推导正确性、例题解析逻辑、习题答案正确性、单位与符号一致性、表述清晰度，并按 JSON 数组形式输出改进建议，每条包含 {"location":"...", "issue":"...", "suggestion":"...", "patch":"建议替换为的 LaTeX 片段"}。不要输出 JSON 以外的内容。</textarea>
+      </label>
+    </div>
+    <div class="row">
+      <button id="saveDefaults" class="btn btn-primary">保存默认配置</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h3>共享 / 协作</h3>
+    <label>共享访问 Token（同事用此 Token 才能加载/保存同一项目）
+      <input id="shareToken" placeholder="留空表示不启用 Token，仅靠项目 ID" />
+    </label>
+    <div class="row">
+      <button id="saveShare" class="btn btn-primary">保存</button>
+    </div>
+    <p class="muted small">说明：所有项目数据按 <code>project:&lt;ID&gt;</code> 存入 Cloudflare KV。同事打开主页输入相同的项目 ID 即可加载共享内容。</p>
+  </section>
+</main>
+
+<template id="providerTpl">
+  <div class="provider">
+    <div class="row">
+      <label class="grow">名称
+        <input class="p-name" placeholder="例：openai-gpt4o" />
+      </label>
+      <label>类型
+        <select class="p-type">
+          <option value="openai">OpenAI 兼容</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="gemini">Google Gemini</option>
+        </select>
+      </label>
+      <button class="btn btn-danger p-del">删除</button>
+    </div>
+    <div class="row">
+      <label class="grow">Base URL
+        <input class="p-base" placeholder="https://api.openai.com/v1" />
+      </label>
+      <label class="grow">模型
+        <input class="p-model" placeholder="gpt-4o-mini / claude-opus-4-7 / deepseek-chat" />
+      </label>
+    </div>
+    <div class="row">
+      <label class="grow">API Key
+        <input class="p-key" type="password" placeholder="sk-..." />
+      </label>
+      <label>Temperature
+        <input class="p-temp" type="number" min="0" max="2" step="0.1" value="0.5" />
+      </label>
+      <label>Max tokens
+        <input class="p-max" type="number" min="256" max="200000" value="4096" />
+      </label>
+    </div>
+    <div class="row">
+      <button class="btn p-test">测试</button>
+      <span class="p-status muted small"></span>
+    </div>
+  </div>
+</template>
+
+<div id="toast" class="toast"></div>
+<script src="/assets/js/storage.js"></script>
+<script src="/assets/js/settings-page.js"></script>
+</body>
+</html>
