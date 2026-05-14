@@ -80,6 +80,30 @@ export function findProvider(settings, name) {
   return (settings.providers || []).find((p) => p.name === name);
 }
 
+// Build a diagnostic message for "provider not found". The single most
+// common cause is that BOOK_KV isn't bound, so settings saved on one
+// request live only in a per-isolate in-memory Map and vanish on the next.
+export function describeMissingProvider(settings, name, env) {
+  const known = (settings.providers || []).map((p) => p.name);
+  const kvBound = !!(env && env.BOOK_KV);
+  let msg = "提供商未配置: " + (name || "(空)") + "。";
+  msg += "服务端当前已知提供商: [" + (known.join(", ") || "无") + "]。";
+  if (!kvBound) {
+    msg +=
+      " ⚠ 未检测到 KV 绑定（BOOK_KV）—— 没有 KV 时，设置只存在单个 Worker 实例的内存里，" +
+      "无法跨请求保存，所以测试能过、真正生成时却查不到。请在 Cloudflare Pages 项目 → " +
+      "Settings → Bindings 添加名为 BOOK_KV 的 KV namespace，然后重新保存设置。";
+  } else if (known.length === 0) {
+    msg += " KV 已绑定，但里面没有任何提供商 —— 请到设置页重新保存一次。";
+  } else {
+    msg +=
+      " KV 已绑定。名字对不上 —— 检查设置页里提供商名称是否与此处发送的『" +
+      (name || "") +
+      "』完全一致（区分大小写、空格）。";
+  }
+  return msg;
+}
+
 // Read a fetch Response, returning { ok, status, json, text }. Never throws.
 async function readResponse(r) {
   const text = await r.text().catch(() => "");

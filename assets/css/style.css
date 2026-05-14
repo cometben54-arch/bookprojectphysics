@@ -259,6 +259,21 @@ progress::-moz-progress-bar { background: var(--primary); }
   border-radius: 6px;
   padding: 12px;
 }
+.kv-warning {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.kv-warning code {
+  background: var(--code-bg);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
 .provider-summary {
   background: var(--bg);
   border: 1px solid var(--border);

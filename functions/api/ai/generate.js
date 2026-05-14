@@ -3,6 +3,7 @@ import {
   error,
   authorize,
   findProvider,
+  describeMissingProvider,
   aiComplete,
 } from "../../_shared.js";
 
@@ -18,7 +19,7 @@ export const onRequestPost = async ({ request, env }) => {
   }
   const provider = findProvider(auth.settings, body.provider);
   if (!provider)
-    return error("提供商未配置: " + (body.provider || "(空)"), 400);
+    return error(describeMissingProvider(auth.settings, body.provider, env), 400);
 
   try {
     const r = await aiComplete({

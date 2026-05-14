@@ -399,9 +399,25 @@
     }
   }
 
+  // Surface a prominent warning if the server has no KV binding — without
+  // it, settings can't persist across requests and the whole app breaks
+  // in confusing ways.
+  async function checkKvBinding() {
+    try {
+      const r = await fetch("/api/health");
+      if (!r.ok) return;
+      const h = await r.json();
+      const warn = $("#kvWarning");
+      if (warn) warn.hidden = !!h.kv;
+    } catch {
+      // ignore
+    }
+  }
+
   // Snapshot whatever was loaded from localStorage, so freshly displayed
   // providers don't immediately appear "未保存".
   markAllSaved();
   render();
   bootstrapFromRemote();
+  checkKvBinding();
 })();

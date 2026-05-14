@@ -3,6 +3,7 @@ import {
   error,
   authorize,
   findProvider,
+  describeMissingProvider,
   readResponse,
   describeHttpError,
   geminiBase,
@@ -122,7 +123,8 @@ export const onRequestPost = async ({ request, env }) => {
   if (!auth.ok) return error(auth.error, auth.status);
   const body = await request.json().catch(() => ({}));
   const provider = findProvider(auth.settings, body.provider);
-  if (!provider) return error("提供商未配置: " + body.provider, 400);
+  if (!provider)
+    return error(describeMissingProvider(auth.settings, body.provider, env), 400);
   const prompt = (body.prompt || "").trim();
   if (!prompt) return error("提示词为空");
 
