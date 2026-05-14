@@ -11,6 +11,13 @@
     setTimeout(() => (t.className = "toast"), 2400);
   }
 
+  // Default API base URL per provider type.
+  const DEFAULT_BASE = {
+    openai: "https://api.openai.com/v1",
+    anthropic: "https://api.anthropic.com/v1",
+    gemini: "https://generativelanguage.googleapis.com/v1beta",
+  };
+
   let settings = store.loadSettings();
 
   // JSON snapshot of each provider as last persisted to the server.
@@ -115,17 +122,19 @@
       max: tpl.querySelector(".p-max"),
     };
     Object.entries(fields).forEach(([k, el]) => (el.value = p[k] || ""));
-    const setDefaultBase = () => {
-      if (fields.base.value) return;
-      const map = {
-        openai: "https://api.openai.com/v1",
-        anthropic: "https://api.anthropic.com/v1",
-        gemini: "https://generativelanguage.googleapis.com/v1beta",
-      };
-      fields.base.value = map[fields.type.value] || "";
+    // When the provider type changes, fill the matching default Base URL.
+    // We overwrite the field if it's empty OR still holds another type's
+    // default (i.e. the user hasn't customised it); a hand-typed base is
+    // left untouched.
+    const knownDefaults = Object.values(DEFAULT_BASE);
+    const applyDefaultBase = () => {
+      const cur = fields.base.value.trim();
+      if (!cur || knownDefaults.includes(cur)) {
+        fields.base.value = DEFAULT_BASE[fields.type.value] || "";
+      }
     };
-    fields.type.addEventListener("change", setDefaultBase);
-    if (!p.base) setDefaultBase();
+    fields.type.addEventListener("change", applyDefaultBase);
+    if (!p.base) applyDefaultBase();
     const savedBadge = root.querySelector(".p-saved-badge");
     const testedBadge = root.querySelector(".p-tested-badge");
     const updateBadges = () => {
