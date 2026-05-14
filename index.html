@@ -22,6 +22,7 @@
 
 <nav class="tabs">
   <button class="tab active" data-tab="write">写作</button>
+  <button class="tab" data-tab="pdf">PDF 翻译</button>
   <button class="tab" data-tab="template">模板</button>
   <button class="tab" data-tab="merge">合并</button>
   <button class="tab" data-tab="proof">校对</button>
@@ -93,6 +94,63 @@
         <span class="muted small">提示：每节是独立 LaTeX 片段，导出时会按顺序拼接。</span>
       </div>
       <div id="sectionList" class="section-list"></div>
+    </div>
+  </section>
+
+  <!-- ============== PDF 翻译 ============== -->
+  <section class="panel" data-panel="pdf">
+    <div class="card">
+      <h3>1. 上传 PDF 并解析</h3>
+      <p class="muted small">浏览器端用 pdf.js 解析（不上传到服务器）。大书 (200+ 页) 也可以处理，但解析需要几十秒。</p>
+      <div class="row">
+        <input id="pdfFile" type="file" accept="application/pdf" />
+        <button id="pdfParse" class="btn btn-primary">解析</button>
+        <span id="pdfParseStatus" class="muted small"></span>
+      </div>
+      <details>
+        <summary>解析后的全文（可手动编辑后再切块）</summary>
+        <textarea id="pdfFullText" rows="10" placeholder="解析后会在此显示原文，可手动校正"></textarea>
+      </details>
+    </div>
+
+    <div class="card">
+      <h3>2. 切块策略</h3>
+      <div class="row">
+        <label class="inline"><input type="radio" name="pdfStrategy" value="auto" checked /> 自动（先按章节，再按长度）</label>
+        <label class="inline"><input type="radio" name="pdfStrategy" value="chapter" /> 仅按章节</label>
+        <label class="inline"><input type="radio" name="pdfStrategy" value="length" /> 仅按长度</label>
+      </div>
+      <div class="row">
+        <label>每块目标字符数
+          <input id="pdfChunkSize" type="number" value="8000" min="2000" max="30000" />
+        </label>
+        <button id="pdfChunk" class="btn">切块</button>
+        <span id="pdfChunkStatus" class="muted small"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>3. 翻译 / 改写流水线</h3>
+      <div class="row">
+        <label>风格
+          <select id="pdfStyle">
+            <option value="rewrite">改写为中文教辅（推荐）</option>
+            <option value="translate">忠实翻译，保留结构</option>
+          </select>
+        </label>
+        <label>每批处理章节数
+          <input id="pdfBatch" type="number" value="1" min="1" max="10" />
+        </label>
+        <label class="inline"><input type="checkbox" id="pdfAuto" /> 自动模式（不暂停，一路跑完）</label>
+      </div>
+      <div class="row">
+        <button id="pdfRun" class="btn btn-primary">开始 / 继续下一批</button>
+        <button id="pdfPause" class="btn" disabled>暂停</button>
+        <button id="pdfReset" class="btn btn-danger">重置任务</button>
+        <span id="pdfRunStatus" class="muted small"></span>
+      </div>
+      <progress id="pdfProg" max="100" value="0"></progress>
+      <div id="pdfChunkList" class="chunk-list"></div>
     </div>
   </section>
 
@@ -246,6 +304,7 @@
 <script src="/assets/js/ai-client.js"></script>
 <script src="/assets/js/images.js"></script>
 <script src="/assets/js/latex.js"></script>
+<script src="/assets/js/pdf-translate.js"></script>
 <script src="/assets/js/app.js"></script>
 </body>
 </html>

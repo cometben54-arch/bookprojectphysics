@@ -28,13 +28,21 @@
    - 选定章节、选定校对目标（知识/例题/习题），并行调用多个 AI 提供商
    - 每条建议含 `位置 / 问题 / 建议 / patch`
    - 一键追加 / 替换 / 忽略
-7. **图片 / 插图**
+7. **PDF 翻译 → 中文成书**
+   - 浏览器端用 pdf.js 解析大 PDF（不上传到服务器）
+   - 自动按章节标题或定长字符切块；每块可手改标题
+   - 选定写作 AI 提供商，按批次（默认 1 块/批）调用 AI 翻译并改写为中文 LaTeX 教辅章节
+   - 每批完成自动暂停 → 可预览每块的原文与 AI 输出 → 点"继续"运行下一批
+   - 勾选**自动模式**后全程不暂停，直到整本 PDF 处理完
+   - 失败的块可单独"重试"，无关的块可"跳过"；完成的块"跳到写作"直接定位到对应章节
+   - 状态会随项目存到 KV，同事打开同一项目 ID 可看到进度并继续
+8. **图片 / 插图**
    - 每节带"插图"区，支持上传任意格式（JPG/WEBP/SVG/AVIF/...），浏览器端 Canvas 自动转 PNG 后存到 KV
    - **AI 文生图**（OpenAI `gpt-image-1`/`dall-e-3`、Gemini `imagen-3.0-generate-001`）
    - 一键插入到知识讲解末尾、任一例题或习题位置（自动产出 `\begin{figure}...\includegraphics{images/<id>.png}...\end{figure}`）
    - 任意时刻可上传新图替换旧图（保持同一 id，文中引用不用改）
    - 导出新增 **ZIP** 模式：`book.tex` + `images/` 目录，解压即可 `xelatex` 编译
-8. **多人协作**
+9. **多人协作**
    - 顶部输入「项目 ID」+ 后台「共享 Token」即可在 Cloudflare KV 中共享同一项目
    - 本地 localStorage 兜底；保存/载入自动取最新
 
@@ -88,6 +96,7 @@ npm run dev      # wrangler pages dev
 │       ├── storage.js        # 本地 + 远端项目存储
 │       ├── ai-client.js      # 浏览器侧 AI 调用封装（通过本站代理）
 │       ├── images.js         # 图片上传 / Canvas 转 PNG / AI 文生图 / 插入
+│       ├── pdf-translate.js  # PDF 解析 / 切块 / 分批翻译流水线
 │       ├── latex.js          # preamble 构建 + 合并器
 │       ├── app.js            # 主页所有逻辑
 │       └── settings-page.js  # 后台齿轮逻辑

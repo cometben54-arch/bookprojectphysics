@@ -49,6 +49,18 @@
       refText: "",
       refSummary: "",
       sections: [], // [{title, knowledge, examples:[{q,sol}], exercises:[{q,a}], images:[{id,name,caption}]}]
+      pdf: {
+        // PDF-translate state. fullText is the extracted source; chunks
+        // remembers progress so a coworker can resume the job later.
+        fileName: "",
+        numPages: 0,
+        fullText: "",
+        chunks: [], // [{id, title, text, status, output, sectionIdx, error}]
+        cursor: 0,
+        batchSize: 1,
+        autoMode: false,
+        style: "rewrite",
+      },
       template: {
         docClass: "ctexbook",
         opts: "UTF8,a4paper,11pt,oneside",
