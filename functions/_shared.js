@@ -80,6 +80,44 @@ export function findProvider(settings, name) {
   return (settings.providers || []).find((p) => p.name === name);
 }
 
+// Read a fetch Response, returning { ok, status, json, text }. Never throws.
+async function readResponse(r) {
+  const text = await r.text().catch(() => "");
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
+  }
+  return { ok: r.ok, status: r.status, statusText: r.statusText, json, text };
+}
+
+// Build a detailed error string so the UI shows the real cause instead of "{}".
+function describeHttpError(label, res) {
+  const j = res.json;
+  let detail =
+    (j && (j.error?.message || (typeof j.error === "string" && j.error))) ||
+    "";
+  if (!detail) {
+    const raw = (res.text || "").trim();
+    detail = raw
+      ? raw.slice(0, 400)
+      : "（响应体为空 — 通常是 URL 路径错误或网络拦截）";
+  }
+  return `${label} ${res.status} ${res.statusText || ""}: ${detail}`.trim();
+}
+
+// Normalise a Gemini base URL. The API needs a version segment (/v1beta or
+// /v1); users frequently paste just the host, which 404s with an empty body.
+function geminiBase(base) {
+  const b = (base || "https://generativelanguage.googleapis.com").replace(
+    /\/+$/,
+    ""
+  );
+  if (/\/v1(beta)?$/.test(b)) return b;
+  return b + "/v1beta";
+}
+
 // Unified completion call across providers. Returns { content, raw }.
 export async function aiComplete({ provider, system, user, max_tokens, temperature }) {
   if (!provider) throw new Error("未指定提供商");
@@ -88,85 +126,114 @@ export async function aiComplete({ provider, system, user, max_tokens, temperatu
   const temp = temperature ?? provider.temp ?? 0.5;
 
   if (provider.type === "openai") {
-    const r = await fetch(base + "/chat/completions", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: "Bearer " + (provider.key || ""),
-      },
-      body: JSON.stringify({
-        model: provider.model,
-        temperature: temp,
-        max_tokens: max,
-        messages: [
-          ...(system ? [{ role: "system", content: system }] : []),
-          { role: "user", content: user },
-        ],
-      }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok)
-      throw new Error(
-        "OpenAI 错误：" + (j.error?.message || JSON.stringify(j) || r.status)
-      );
+    let r;
+    try {
+      r = await fetch(base + "/chat/completions", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer " + (provider.key || ""),
+        },
+        body: JSON.stringify({
+          model: provider.model,
+          temperature: temp,
+          max_tokens: max,
+          messages: [
+            ...(system ? [{ role: "system", content: system }] : []),
+            { role: "user", content: user },
+          ],
+        }),
+      });
+    } catch (e) {
+      throw new Error("OpenAI 网络错误：" + (e.message || e) + "（检查 Base URL）");
+    }
+    const res = await readResponse(r);
+    if (!res.ok) throw new Error(describeHttpError("OpenAI", res));
+    const j = res.json || {};
     const content =
       j.choices?.[0]?.message?.content ?? j.choices?.[0]?.text ?? "";
     return { content, raw: j };
   }
 
   if (provider.type === "anthropic") {
-    const r = await fetch(base + "/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": provider.key || "",
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: provider.model,
-        max_tokens: max,
-        temperature: temp,
-        system: system || undefined,
-        messages: [{ role: "user", content: user }],
-      }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok)
+    let r;
+    try {
+      r = await fetch(base + "/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": provider.key || "",
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: provider.model,
+          max_tokens: max,
+          temperature: temp,
+          system: system || undefined,
+          messages: [{ role: "user", content: user }],
+        }),
+      });
+    } catch (e) {
       throw new Error(
-        "Anthropic 错误：" + (j.error?.message || JSON.stringify(j) || r.status)
+        "Anthropic 网络错误：" + (e.message || e) + "（检查 Base URL）"
       );
-    const content = (j.content || [])
-      .map((b) => b.text || "")
-      .join("");
+    }
+    const res = await readResponse(r);
+    if (!res.ok) throw new Error(describeHttpError("Anthropic", res));
+    const j = res.json || {};
+    const content = (j.content || []).map((b) => b.text || "").join("");
     return { content, raw: j };
   }
 
   if (provider.type === "gemini") {
     const url =
-      base +
+      geminiBase(provider.base) +
       "/models/" +
       encodeURIComponent(provider.model) +
       ":generateContent?key=" +
       encodeURIComponent(provider.key || "");
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: system ? { parts: [{ text: system }] } : undefined,
-        contents: [{ role: "user", parts: [{ text: user }] }],
-        generationConfig: { temperature: temp, maxOutputTokens: max },
-      }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok)
+    let r;
+    try {
+      r = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: system
+            ? { parts: [{ text: system }] }
+            : undefined,
+          contents: [{ role: "user", parts: [{ text: user }] }],
+          generationConfig: { temperature: temp, maxOutputTokens: max },
+        }),
+      });
+    } catch (e) {
       throw new Error(
-        "Gemini 错误：" + (j.error?.message || JSON.stringify(j) || r.status)
+        "Gemini 网络错误：" + (e.message || e) + "（检查 Base URL）"
       );
+    }
+    const res = await readResponse(r);
+    if (!res.ok) throw new Error(describeHttpError("Gemini", res));
+    const j = res.json || {};
+    // A 200 can still carry a blocked / empty candidate — surface that too.
+    if (j.promptFeedback?.blockReason) {
+      throw new Error(
+        "Gemini 内容被拦截：" + j.promptFeedback.blockReason
+      );
+    }
     const content = (j.candidates?.[0]?.content?.parts || [])
       .map((p) => p.text || "")
       .join("");
+    if (!content && j.candidates?.[0]?.finishReason) {
+      throw new Error(
+        "Gemini 未返回文本（finishReason=" +
+          j.candidates[0].finishReason +
+          "）"
+      );
+    }
     return { content, raw: j };
   }
 
   throw new Error("未知提供商类型: " + provider.type);
 }
+
+export { readResponse, describeHttpError, geminiBase };
+

@@ -3,6 +3,9 @@ import {
   error,
   authorize,
   findProvider,
+  readResponse,
+  describeHttpError,
+  geminiBase,
 } from "../../_shared.js";
 
 // Generate an image from a text prompt using the chosen provider.
@@ -39,34 +42,44 @@ async function fetchUrlAsB64(url) {
 async function genOpenAI(provider, prompt, size) {
   const base = (provider.base || "").replace(/\/+$/, "");
   const model = provider.imageModel || provider.model;
-  const r = await fetch(base + "/images/generations", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: "Bearer " + (provider.key || ""),
-    },
-    body: JSON.stringify({
-      model,
-      prompt,
-      n: 1,
-      size: size || "1024x1024",
-      response_format: "b64_json",
-    }),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok)
-    throw new Error("OpenAI: " + (j.error?.message || JSON.stringify(j)));
+  if (!model)
+    throw new Error("未设置图像模型（在该提供商的『图像模型』栏填 gpt-image-1 等）");
+  let r;
+  try {
+    r = await fetch(base + "/images/generations", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + (provider.key || ""),
+      },
+      body: JSON.stringify({
+        model,
+        prompt,
+        n: 1,
+        size: size || "1024x1024",
+        response_format: "b64_json",
+      }),
+    });
+  } catch (e) {
+    throw new Error("OpenAI 网络错误：" + (e.message || e) + "（检查 Base URL）");
+  }
+  const res = await readResponse(r);
+  if (!res.ok) throw new Error(describeHttpError("OpenAI 图像", res));
+  const j = res.json || {};
   const item = j.data?.[0] || {};
   if (item.b64_json) return item.b64_json;
   if (item.url) return await fetchUrlAsB64(item.url);
-  throw new Error("OpenAI 未返回图像数据");
+  throw new Error("OpenAI 未返回图像数据：" + JSON.stringify(j).slice(0, 300));
 }
 
 async function genGemini(provider, prompt, size) {
-  const base = (provider.base || "").replace(/\/+$/, "");
   const model = provider.imageModel || provider.model;
+  if (!model)
+    throw new Error(
+      "未设置图像模型（在该提供商的『图像模型』栏填 imagen-3.0-generate-001 等）"
+    );
   const url =
-    base +
+    geminiBase(provider.base) +
     "/models/" +
     encodeURIComponent(model) +
     ":predict?key=" +
@@ -79,20 +92,28 @@ async function genGemini(provider, prompt, size) {
         return "9:16";
       })()
     : "1:1";
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      instances: [{ prompt }],
-      parameters: { sampleCount: 1, aspectRatio: aspect },
-    }),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok)
-    throw new Error("Gemini: " + (j.error?.message || JSON.stringify(j)));
+  let r;
+  try {
+    r = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        instances: [{ prompt }],
+        parameters: { sampleCount: 1, aspectRatio: aspect },
+      }),
+    });
+  } catch (e) {
+    throw new Error("Gemini 网络错误：" + (e.message || e) + "（检查 Base URL）");
+  }
+  const res = await readResponse(r);
+  if (!res.ok) throw new Error(describeHttpError("Gemini 图像", res));
+  const j = res.json || {};
   const pred = j.predictions?.[0] || {};
   const b64 = pred.bytesBase64Encoded || pred.image?.bytesBase64Encoded;
-  if (!b64) throw new Error("Gemini 未返回图像数据");
+  if (!b64)
+    throw new Error(
+      "Gemini 未返回图像数据：" + JSON.stringify(j).slice(0, 300)
+    );
   return b64;
 }
 
