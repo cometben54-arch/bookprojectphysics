@@ -21,6 +21,7 @@
   <section class="card">
     <h3>AI 服务提供商</h3>
     <p class="muted small">在此添加一个或多个 AI 提供商（OpenAI / Anthropic / DeepSeek / 任意 OpenAI 兼容接口）。所有调用通过本站 Pages Functions 代理，避免在前端暴露 Key。Key 存放在 Cloudflare KV（若已配置 BOOK_KV）或浏览器 localStorage。</p>
+    <div id="providerSummary" class="provider-summary"></div>
     <div id="providerList" class="provider-list"></div>
     <div class="row">
       <button id="addProvider" class="btn btn-primary">+ 添加提供商</button>
@@ -113,7 +114,10 @@
       </label>
     </div>
     <div class="row">
+      <button class="btn btn-primary p-save">保存</button>
       <button class="btn p-test">测试</button>
+      <span class="p-saved-badge"></span>
+      <span class="p-tested-badge"></span>
       <span class="p-status muted small"></span>
     </div>
   </div>

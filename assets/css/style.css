@@ -259,6 +259,43 @@ progress::-moz-progress-bar { background: var(--primary); }
   border-radius: 6px;
   padding: 12px;
 }
+.provider-summary {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.prov-summary-title {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+.prov-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px dashed var(--border);
+}
+.prov-row:first-of-type { border-top: none; }
+.p-saved-badge, .p-tested-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--border);
+  color: var(--muted);
+}
+.p-saved-badge.done, .p-tested-badge.done {
+  background: var(--ok);
+  color: #fff;
+}
+.p-tested-badge.error {
+  background: var(--danger);
+  color: #fff;
+}
 
 .proof-results { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
 .proof-block {

@@ -13,6 +13,10 @@
 
   let settings = store.loadSettings();
 
+  // JSON snapshot of each provider as last persisted to the server.
+  // Used to mark the card "未保存" when the form fields drift.
+  let lastSavedSnap = new Map(); // name -> JSON
+
   function newProvider(p = {}) {
     return {
       name: p.name || "",
@@ -23,7 +27,24 @@
       key: p.key || "",
       temp: p.temp ?? 0.5,
       max: p.max ?? 4096,
+      // tested: { ok, msg, at }   ← filled after each test
     };
+  }
+
+  // For dirty-tracking we ignore the "tested" status field (it's just metadata).
+  function snapshot(p) {
+    if (!p) return "";
+    const { tested, ...rest } = p;
+    return JSON.stringify(rest);
+  }
+  function isDirty(p) {
+    return snapshot(p) !== (lastSavedSnap.get(p.name) || "");
+  }
+  function markAllSaved() {
+    lastSavedSnap = new Map();
+    (settings.providers || []).forEach((p) =>
+      lastSavedSnap.set(p.name, snapshot(p))
+    );
   }
 
   function render() {
@@ -31,6 +52,7 @@
     list.innerHTML = "";
     settings.providers = settings.providers || [];
     settings.providers.forEach((p, i) => list.appendChild(buildCard(p, i)));
+    renderSummary();
     refreshDropdowns();
     $("#defTimeout").value = settings.timeout || 120;
     $("#defConcurrency").value = settings.concurrency || 2;
@@ -43,6 +65,40 @@
       $("#defSysProof").defaultValue ||
       $("#defSysProof").value;
     $("#shareToken").value = settings.shareToken || "";
+  }
+
+  function renderSummary() {
+    const wrap = $("#providerSummary");
+    if (!wrap) return;
+    const list = settings.providers || [];
+    if (!list.length) {
+      wrap.innerHTML =
+        '<div class="muted small">暂无已配置的提供商。点击下方「添加提供商」开始。</div>';
+      return;
+    }
+    const items = list.map((p) => {
+      const dirty = isDirty(p);
+      let icon = '<span class="badge">未保存</span>';
+      if (!dirty) {
+        if (p.tested && p.tested.ok)
+          icon = '<span class="badge done">✓ 已测试通过</span>';
+        else if (p.tested && p.tested.ok === false)
+          icon = '<span class="badge error">✗ 测试失败</span>';
+        else icon = '<span class="badge done">已保存（未测试）</span>';
+      }
+      const name = p.name || "(未命名)";
+      const meta = (p.type || "?") + " · " + (p.model || "未设模型");
+      return `<div class="prov-row"><strong>${escapeHtml(name)}</strong> <span class="muted small">${escapeHtml(meta)}</span> ${icon}</div>`;
+    });
+    wrap.innerHTML =
+      '<div class="prov-summary-title">已配置的提供商</div>' + items.join("");
+  }
+
+  function escapeHtml(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
   }
 
   function buildCard(p, idx) {
@@ -70,8 +126,30 @@
     };
     fields.type.addEventListener("change", setDefaultBase);
     if (!p.base) setDefaultBase();
+    const savedBadge = root.querySelector(".p-saved-badge");
+    const testedBadge = root.querySelector(".p-tested-badge");
+    const updateBadges = () => {
+      const cur = settings.providers[idx];
+      if (!cur) return;
+      const dirty = isDirty(cur);
+      savedBadge.className = "p-saved-badge badge " + (dirty ? "" : "done");
+      savedBadge.textContent = dirty ? "未保存" : "已保存";
+      if (cur.tested && cur.tested.ok) {
+        testedBadge.className = "p-tested-badge badge done";
+        testedBadge.title = cur.tested.msg || "";
+        testedBadge.textContent = "✓ 测试通过";
+      } else if (cur.tested && cur.tested.ok === false) {
+        testedBadge.className = "p-tested-badge badge error";
+        testedBadge.title = cur.tested.msg || "";
+        testedBadge.textContent = "✗ 测试失败";
+      } else {
+        testedBadge.className = "p-tested-badge";
+        testedBadge.textContent = "";
+      }
+    };
     const sync = () => {
       settings.providers[idx] = {
+        ...settings.providers[idx], // preserve `tested` and other metadata
         name: fields.name.value.trim(),
         type: fields.type.value,
         base: fields.base.value.trim(),
@@ -82,22 +160,42 @@
         max: Number(fields.max.value),
       };
       refreshDropdowns();
+      updateBadges();
+      renderSummary();
     };
     root.addEventListener("input", sync);
     root.addEventListener("change", sync);
+
     tpl.querySelector(".p-del").addEventListener("click", async () => {
       if (!confirm("删除此提供商？")) return;
       settings.providers.splice(idx, 1);
       await persist();
       render();
     });
-    tpl.querySelector(".p-test").addEventListener("click", async () => {
+
+    tpl.querySelector(".p-save").addEventListener("click", async () => {
       const status = root.querySelector(".p-status");
-      status.textContent = "保存配置中...";
+      status.textContent = "保存中...";
       status.style.color = "";
       try {
         await persist();
-        status.textContent = "测试中...";
+        status.textContent = "✓ 已保存";
+        status.style.color = "var(--ok)";
+        toast("已保存", "ok");
+        updateBadges();
+        renderSummary();
+      } catch (e) {
+        status.textContent = "✗ " + e.message;
+        status.style.color = "var(--danger)";
+      }
+    });
+
+    tpl.querySelector(".p-test").addEventListener("click", async () => {
+      const status = root.querySelector(".p-status");
+      status.textContent = "保存并测试中...";
+      status.style.color = "";
+      try {
+        await persist();
         const res = await fetch("/api/ai/test", {
           method: "POST",
           headers: {
@@ -108,6 +206,14 @@
           },
           body: JSON.stringify({ provider: fields.name.value.trim() }),
         }).then((r) => r.json());
+        const cur = settings.providers[idx];
+        if (cur) {
+          cur.tested = {
+            ok: !!(res && res.ok),
+            msg: (res && (res.sample || res.error)) || "",
+            at: Date.now(),
+          };
+        }
         if (res && res.ok) {
           status.textContent = "✓ 连通：" + (res.sample || "OK");
           status.style.color = "var(--ok)";
@@ -115,11 +221,17 @@
           status.textContent = "✗ " + (res && res.error ? res.error : "失败");
           status.style.color = "var(--danger)";
         }
+        // Persist tested status to server too.
+        await persist();
+        updateBadges();
+        renderSummary();
       } catch (e) {
         status.textContent = "✗ " + e.message;
         status.style.color = "var(--danger)";
       }
     });
+
+    updateBadges();
     return root;
   }
 
@@ -178,9 +290,21 @@
       if (!r.ok) {
         const t = await r.text().catch(() => "");
         console.warn("settings push failed:", r.status, t);
+        toast(
+          "保存到云端失败（" + r.status + "）。本地已保存。",
+          "err"
+        );
+        renderSummary();
+        return false;
       }
+      markAllSaved();
+      renderSummary();
+      return true;
     } catch (e) {
       console.warn("settings push error:", e);
+      toast("保存到云端失败：" + e.message + "。本地已保存。", "err");
+      renderSummary();
+      return false;
     }
   }
 
@@ -246,12 +370,16 @@
       });
       settings = { ...settings, ...remote };
       store.saveSettings(settings);
+      markAllSaved();
       render();
     } catch {
       // ignore — offline / no KV is fine
     }
   }
 
+  // Snapshot whatever was loaded from localStorage, so freshly displayed
+  // providers don't immediately appear "未保存".
+  markAllSaved();
   render();
   bootstrapFromRemote();
 })();
