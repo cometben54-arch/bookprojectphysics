@@ -1,1 +1,6 @@
-/settings  /settings.html  200
+# Cloudflare Pages routing rules.
+#
+# We previously had `/settings  /settings.html  200` here, but Cloudflare
+# Pages' built-in pretty-URL handling already strips `.html` and ended up
+# bouncing /settings <-> /settings.html in a loop (ERR_TOO_MANY_REDIRECTS).
+# Leaving this file empty means Pages serves /settings.html directly.
