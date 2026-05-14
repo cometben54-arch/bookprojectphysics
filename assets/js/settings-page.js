@@ -19,6 +19,7 @@
       type: p.type || "openai",
       base: p.base || "",
       model: p.model || "",
+      imageModel: p.imageModel || "",
       key: p.key || "",
       temp: p.temp ?? 0.5,
       max: p.max ?? 4096,
@@ -52,11 +53,12 @@
       type: tpl.querySelector(".p-type"),
       base: tpl.querySelector(".p-base"),
       model: tpl.querySelector(".p-model"),
+      imageModel: tpl.querySelector(".p-imodel"),
       key: tpl.querySelector(".p-key"),
       temp: tpl.querySelector(".p-temp"),
       max: tpl.querySelector(".p-max"),
     };
-    Object.entries(fields).forEach(([k, el]) => (el.value = p[k]));
+    Object.entries(fields).forEach(([k, el]) => (el.value = p[k] || ""));
     const setDefaultBase = () => {
       if (fields.base.value) return;
       const map = {
@@ -74,6 +76,7 @@
         type: fields.type.value,
         base: fields.base.value.trim(),
         model: fields.model.value.trim(),
+        imageModel: fields.imageModel.value.trim(),
         key: fields.key.value,
         temp: Number(fields.temp.value),
         max: Number(fields.max.value),
@@ -141,9 +144,11 @@
     }
     fill($("#defWrite"));
     fill($("#defParse"));
+    fill($("#defImage"));
     fill($("#defProof"), true);
     $("#defWrite").value = settings.write || $("#defWrite").value;
     $("#defParse").value = settings.parse || $("#defParse").value;
+    $("#defImage").value = settings.image || $("#defImage").value;
   }
 
   function persist() {
@@ -151,6 +156,7 @@
     settings.concurrency = Number($("#defConcurrency").value) || 2;
     settings.write = $("#defWrite").value;
     settings.parse = $("#defParse").value;
+    settings.image = $("#defImage").value;
     settings.proof = Array.from($("#defProof").selectedOptions).map(
       (o) => o.value
     );

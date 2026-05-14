@@ -28,6 +28,34 @@ export function kvDel(env, key) {
   return Promise.resolve();
 }
 
+// Binary KV helpers (for images). Stores raw bytes + metadata.
+export async function kvPutBytes(env, key, bytes, metadata) {
+  if (env && env.BOOK_KV)
+    return env.BOOK_KV.put(key, bytes, { metadata });
+  memKV.set(key, { bytes, metadata });
+  return Promise.resolve();
+}
+export async function kvGetBytes(env, key) {
+  if (env && env.BOOK_KV) {
+    const r = await env.BOOK_KV.getWithMetadata(key, { type: "arrayBuffer" });
+    if (!r || !r.value) return null;
+    return { bytes: r.value, metadata: r.metadata || {} };
+  }
+  return memKV.get(key) || null;
+}
+export async function kvList(env, prefix) {
+  if (env && env.BOOK_KV) {
+    const r = await env.BOOK_KV.list({ prefix });
+    return r.keys.map((k) => ({ name: k.name, metadata: k.metadata || {} }));
+  }
+  const out = [];
+  for (const [k, v] of memKV.entries()) {
+    if (k.startsWith(prefix))
+      out.push({ name: k, metadata: (v && v.metadata) || {} });
+  }
+  return out;
+}
+
 const SETTINGS_KEY = "global:settings";
 
 export async function loadGlobalSettings(env) {

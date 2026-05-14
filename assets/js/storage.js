@@ -18,6 +18,7 @@
     providers: [],
     write: "",
     parse: "",
+    image: "",
     proof: [],
     timeout: 120,
     concurrency: 2,
@@ -47,7 +48,7 @@
       outline: "",
       refText: "",
       refSummary: "",
-      sections: [], // [{id, title, knowledge, examples:[{q,sol}], exercises:[{q,a}]}]
+      sections: [], // [{title, knowledge, examples:[{q,sol}], exercises:[{q,a}], images:[{id,name,caption}]}]
       template: {
         docClass: "ctexbook",
         opts: "UTF8,a4paper,11pt,oneside",
