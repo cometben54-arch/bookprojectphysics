@@ -20,10 +20,20 @@ export const onRequestPost = async ({ request, env }) => {
       provider,
       system: "Reply with only the word: pong",
       user: "ping",
-      max_tokens: 16,
+      // Generous budget: Gemini 2.5 / other "thinking" models spend tokens
+      // on internal reasoning first, so a tiny cap (e.g. 16) yields
+      // finishReason=MAX_TOKENS with no visible text.
+      max_tokens: 512,
       temperature: 0,
     });
-    return json({ ok: true, sample: (r.content || "").slice(0, 80) });
+    const sample = (r.content || "").trim();
+    if (!sample)
+      return json({
+        ok: false,
+        error:
+          "提供商返回了空内容（可能是模型名错误或被安全策略拦截）",
+      });
+    return json({ ok: true, sample: sample.slice(0, 80) });
   } catch (e) {
     return json({ ok: false, error: e.message });
   }
