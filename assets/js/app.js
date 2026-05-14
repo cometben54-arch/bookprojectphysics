@@ -105,6 +105,7 @@
     renderTemplate();
     refreshProofSection();
     refreshExportPickers();
+    if (typeof bindPdfFromProject === "function") bindPdfFromProject();
   }
 
   function pullFromUI() {
@@ -978,6 +979,244 @@
       toast("保存失败：" + e.message, "err");
     }
   });
+
+  // ----- PDF translate pipeline -----
+  let pdfJob = null;
+
+  function pdfRender() {
+    const list = $("#pdfChunkList");
+    list.innerHTML = "";
+    if (!pdfJob || !pdfJob.chunks.length) {
+      $("#pdfProg").value = 0;
+      $("#pdfRunStatus").textContent = "";
+      return;
+    }
+    const done = pdfJob.chunks.filter((c) => c.status === "done").length;
+    $("#pdfProg").max = pdfJob.chunks.length;
+    $("#pdfProg").value = done;
+    $("#pdfRunStatus").textContent =
+      `${done}/${pdfJob.chunks.length} 已完成` +
+      (pdfJob.running ? "（运行中）" : pdfJob.autoMode ? "（自动模式）" : "（暂停中）");
+    pdfJob.chunks.forEach((c, i) => list.appendChild(chunkRow(c, i)));
+  }
+
+  function chunkRow(c, i) {
+    const row = document.createElement("div");
+    row.className = "chunk-row chunk-" + c.status;
+    const head = document.createElement("div");
+    head.className = "chunk-head";
+    head.innerHTML = `
+      <span class="badge ${c.status}">${labelStatus(c.status)}</span>
+      <input class="ch-title" value="${escapeHtml(c.title || "")}" />
+      <span class="muted small">${c.text.length} 字</span>
+      <button class="btn ch-toggle">预览原文</button>
+      <button class="btn ch-skip">跳过</button>
+      <button class="btn ch-retry">重试</button>
+      <button class="btn ch-jump" ${c.status === "done" ? "" : "disabled"}>跳到写作</button>`;
+    row.appendChild(head);
+    const body = document.createElement("div");
+    body.className = "chunk-body";
+    body.style.display = "none";
+    body.innerHTML = `
+      <details><summary>原文</summary><pre class="code">${escapeHtml(c.text.slice(0, 4000))}${c.text.length > 4000 ? "\n... [截断显示前 4000 字]" : ""}</pre></details>
+      ${c.output ? `<details open><summary>AI 输出</summary><pre class="code">${escapeHtml(c.output.slice(0, 4000))}${c.output.length > 4000 ? "\n... [截断]" : ""}</pre></details>` : ""}
+      ${c.error ? `<div class="muted small" style="color:var(--danger)">${escapeHtml(c.error)}</div>` : ""}`;
+    row.appendChild(body);
+    head.querySelector(".ch-toggle").addEventListener("click", () => {
+      body.style.display = body.style.display === "none" ? "" : "none";
+    });
+    head.querySelector(".ch-title").addEventListener("input", (e) => {
+      c.title = e.target.value;
+    });
+    head.querySelector(".ch-skip").addEventListener("click", () => {
+      c.status = "skipped";
+      if (pdfJob.cursor === i) pdfJob.cursor++;
+      pdfRender();
+    });
+    head.querySelector(".ch-retry").addEventListener("click", () => {
+      c.status = "pending";
+      c.error = "";
+      c.output = "";
+      if (pdfJob.cursor > i) pdfJob.cursor = i;
+      pdfRender();
+    });
+    head.querySelector(".ch-jump").addEventListener("click", () => {
+      $$(".tab").forEach((x) => x.classList.remove("active"));
+      $$(".panel").forEach((x) => x.classList.remove("active"));
+      document.querySelector('.tab[data-tab="write"]').classList.add("active");
+      $('.panel[data-panel="write"]').classList.add("active");
+      const target = document.querySelectorAll(".section-item")[c.sectionIdx];
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return row;
+  }
+  function labelStatus(s) {
+    return (
+      { pending: "等待", running: "运行中", done: "✓", error: "✗", skipped: "—" }[s] ||
+      s
+    );
+  }
+
+  $("#pdfParse").addEventListener("click", async () => {
+    const f = $("#pdfFile").files[0];
+    if (!f) return toast("请选择 PDF", "err");
+    const status = $("#pdfParseStatus");
+    status.textContent = "加载 pdf.js...";
+    try {
+      const out = await window.BPPX.pdfTranslate.extractPdfText(f, (i, n) => {
+        status.textContent = `解析中 ${i}/${n} 页`;
+      });
+      const fullText = out.pages.join("\n\n");
+      project.pdf = project.pdf || {};
+      project.pdf.fileName = f.name;
+      project.pdf.numPages = out.numPages;
+      project.pdf.fullText = fullText;
+      $("#pdfFullText").value = fullText.slice(0, 200000); // UI cap
+      status.textContent = `✓ 完成：${out.numPages} 页，${fullText.length.toLocaleString()} 字`;
+    } catch (e) {
+      status.textContent = "✗ " + e.message;
+      toast("解析失败：" + e.message, "err");
+    }
+  });
+
+  $("#pdfChunk").addEventListener("click", () => {
+    const text = $("#pdfFullText").value || (project.pdf && project.pdf.fullText);
+    if (!text) return toast("请先解析 PDF", "err");
+    const strategy = $$('input[name="pdfStrategy"]:checked')[0].value;
+    const size = Number($("#pdfChunkSize").value) || 8000;
+    let chunks;
+    if (strategy === "length") {
+      chunks = window.BPPX.pdfTranslate.chunkByLength(text, size);
+    } else if (strategy === "chapter") {
+      chunks = window.BPPX.pdfTranslate.chunkByChapter(text);
+      if (!chunks || chunks.length < 2) {
+        return toast("未检测到章节标记。请改用『仅按长度』或『自动』。", "err");
+      }
+    } else {
+      chunks = window.BPPX.pdfTranslate.chunkText(text, { target: size });
+    }
+    pdfJob = window.BPPX.pdfTranslate.makeJob(chunks, {
+      batchSize: Number($("#pdfBatch").value) || 1,
+      autoMode: $("#pdfAuto").checked,
+      style: $("#pdfStyle").value,
+      provider: store.loadSettings().write,
+      onUpdate: pdfRender,
+      onBatchPause: () => toast("本批完成，已暂停 — 点继续下一批", "ok"),
+      onFinish: () =>
+        toast(
+          "✓ 全部完成 " +
+            pdfJob.chunks.filter((c) => c.status === "done").length +
+            "/" +
+            pdfJob.chunks.length,
+          "ok"
+        ),
+    });
+    // Persist into project so coworkers see the same state on reload.
+    project.pdf.chunks = pdfJob.chunks;
+    project.pdf.cursor = 0;
+    project.pdf.batchSize = pdfJob.batchSize;
+    project.pdf.autoMode = pdfJob.autoMode;
+    project.pdf.style = pdfJob.style;
+    $("#pdfChunkStatus").textContent = "已切成 " + chunks.length + " 块";
+    pdfRender();
+  });
+
+  $("#pdfRun").addEventListener("click", async () => {
+    if (!pdfJob || !pdfJob.chunks.length) {
+      // Try to resume from project state.
+      if (project.pdf && project.pdf.chunks && project.pdf.chunks.length) {
+        pdfJob = window.BPPX.pdfTranslate.makeJob(project.pdf.chunks, {
+          batchSize: Number($("#pdfBatch").value) || project.pdf.batchSize || 1,
+          autoMode: $("#pdfAuto").checked,
+          style: $("#pdfStyle").value || project.pdf.style,
+          provider: store.loadSettings().write,
+          onUpdate: pdfRender,
+          onBatchPause: () => toast("本批完成，已暂停 — 点继续下一批", "ok"),
+          onFinish: () => toast("✓ 全部完成", "ok"),
+        });
+        // restore cursor + per-chunk state
+        pdfJob.chunks.forEach((c, i) => {
+          const old = project.pdf.chunks[i];
+          if (old) Object.assign(c, old);
+        });
+        pdfJob.cursor = project.pdf.cursor || 0;
+      } else {
+        return toast("请先切块", "err");
+      }
+    }
+    if (pdfJob.running) return;
+    // Sync UI changes into job
+    pdfJob.batchSize = Number($("#pdfBatch").value) || 1;
+    pdfJob.autoMode = $("#pdfAuto").checked;
+    pdfJob.style = $("#pdfStyle").value;
+    pdfJob.provider = store.loadSettings().write;
+    if (!pdfJob.provider)
+      return toast("请先到设置选择「写作」提供商", "err");
+
+    $("#pdfPause").disabled = false;
+    $("#pdfRun").disabled = true;
+    try {
+      await window.BPPX.pdfTranslate.run(pdfJob, (sec) => {
+        project.sections.push(sec);
+        // Tag the chunk with its section idx for the "跳到写作" jump button.
+        const last = pdfJob.chunks[pdfJob.cursor];
+        if (last) last.sectionIdx = project.sections.length - 1;
+        // mirror to project.pdf
+        project.pdf.chunks = pdfJob.chunks.map((x) => ({ ...x }));
+        project.pdf.cursor = pdfJob.cursor;
+        renderSections();
+        refreshProofSection();
+        refreshExportPickers();
+      });
+    } finally {
+      $("#pdfPause").disabled = true;
+      $("#pdfRun").disabled = false;
+      project.pdf.chunks = pdfJob.chunks.map((x) => ({ ...x }));
+      project.pdf.cursor = pdfJob.cursor;
+      pdfRender();
+    }
+  });
+
+  $("#pdfPause").addEventListener("click", () => {
+    if (pdfJob) {
+      window.BPPX.pdfTranslate.pause(pdfJob);
+      toast("正在停止（等待当前章节结束）...", "");
+    }
+  });
+
+  $("#pdfAuto").addEventListener("change", () => {
+    if (pdfJob) window.BPPX.pdfTranslate.setAutoMode(pdfJob, $("#pdfAuto").checked);
+  });
+
+  $("#pdfReset").addEventListener("click", () => {
+    if (!confirm("重置 PDF 翻译任务？已生成的章节会保留在『写作』中。")) return;
+    pdfJob = null;
+    project.pdf = store.emptyProject().pdf;
+    $("#pdfFullText").value = "";
+    $("#pdfChunkStatus").textContent = "";
+    pdfRender();
+  });
+
+  function bindPdfFromProject() {
+    if (!project.pdf) return;
+    $("#pdfFullText").value = project.pdf.fullText || "";
+    if (project.pdf.chunks && project.pdf.chunks.length) {
+      pdfJob = window.BPPX.pdfTranslate.makeJob(project.pdf.chunks, {
+        batchSize: project.pdf.batchSize || 1,
+        autoMode: project.pdf.autoMode,
+        style: project.pdf.style || "rewrite",
+        provider: store.loadSettings().write,
+        onUpdate: pdfRender,
+        onBatchPause: () => toast("本批完成", "ok"),
+        onFinish: () => toast("✓ 全部完成", "ok"),
+      });
+      pdfJob.chunks.forEach((c, i) =>
+        Object.assign(c, project.pdf.chunks[i])
+      );
+      pdfJob.cursor = project.pdf.cursor || 0;
+    }
+    pdfRender();
+  }
 
   // ----- init -----
   if (projectId) {

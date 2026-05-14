@@ -367,6 +367,45 @@ progress::-moz-progress-bar { background: var(--primary); }
   object-fit: contain;
 }
 
+/* ----- pdf translate chunk list ----- */
+.chunk-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.chunk-row {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.chunk-row.chunk-running { border-color: var(--primary); }
+.chunk-row.chunk-done    { border-color: var(--ok); }
+.chunk-row.chunk-error   { border-color: var(--danger); }
+.chunk-row.chunk-skipped { opacity: .55; }
+.chunk-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.chunk-head .ch-title {
+  flex: 1; min-width: 240px;
+  background: transparent; border: none; padding: 4px;
+  font-size: 14px;
+}
+.chunk-head .ch-title:focus { background: var(--bg); border: 1px solid var(--primary); }
+.chunk-head .btn { padding: 3px 8px; font-size: 11px; }
+.chunk-body { margin-top: 6px; }
+.chunk-body .code { max-height: 360px; }
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--border);
+  color: var(--muted);
+  min-width: 50px;
+  text-align: center;
+}
+.badge.running { background: var(--primary); color: #fff; }
+.badge.done    { background: var(--ok); color: #fff; }
+.badge.error   { background: var(--danger); color: #fff; }
+.badge.skipped { background: var(--panel); }
+
 .toast {
   position: fixed;
   bottom: 20px; right: 20px;
