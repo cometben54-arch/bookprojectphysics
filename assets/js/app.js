@@ -10,6 +10,7 @@
   let project = store.emptyProject();
   let projectId = store.lastProjectId();
   let genAbort = null;
+  let imgModalCtx = null; // { sectionIdx, blob }
 
   function toast(msg, kind = "") {
     const t = $("#toast");
@@ -194,6 +195,16 @@
         <label>习题（同上，分隔标记 <code>%%EX%%</code>，每题 题/答 两段）
           <textarea class="s-exc" rows="8">${escapeHtml(serializeQA(s.exercises, "a"))}</textarea>
         </label>
+        <div class="img-area">
+          <div class="row">
+            <strong>插图</strong>
+            <button class="btn s-upload">上传图片</button>
+            <button class="btn s-aigen">AI 文生图</button>
+            <span class="muted small">上传任意格式（JPG/WEBP/SVG/...），自动转 PNG。点击插图可插入或替换。</span>
+          </div>
+          <div class="img-grid"></div>
+          <input type="file" class="s-upload-file" accept="image/*" hidden />
+        </div>
       </div>`;
     const set = (sel, fn) =>
       root.querySelector(sel).addEventListener("input", () => {
@@ -231,7 +242,154 @@
     root.querySelector(".s-regen").addEventListener("click", () =>
       generateSection(idx)
     );
+    // Image area
+    s.images = s.images || [];
+    const grid = root.querySelector(".img-grid");
+    const fileIn = root.querySelector(".s-upload-file");
+    function renderGrid() {
+      grid.innerHTML = "";
+      s.images.forEach((meta, mi) => grid.appendChild(imgTile(s, mi)));
+    }
+    root.querySelector(".s-upload").addEventListener("click", () =>
+      fileIn.click()
+    );
+    fileIn.addEventListener("change", async () => {
+      for (const f of fileIn.files) {
+        try {
+          await uploadAndRegister(s, f);
+        } catch (e) {
+          toast("上传失败：" + e.message, "err");
+        }
+      }
+      fileIn.value = "";
+      renderGrid();
+    });
+    root.querySelector(".s-aigen").addEventListener("click", () =>
+      openImgModal(idx)
+    );
+    renderGrid();
     return root;
+  }
+
+  // ----- image helpers (hooked from sectionEl) -----
+  async function uploadAndRegister(section, fileOrBlob, opts = {}) {
+    if (!projectId)
+      throw new Error("先在右上输入项目 ID 并保存一次再上传图片");
+    const id = opts.id || window.BPPX.images.newId();
+    const png = await window.BPPX.images.fileToPng(fileOrBlob);
+    const meta = {
+      name: opts.name || fileOrBlob.name || id + ".png",
+      caption: opts.caption || "",
+      width: png.width,
+      height: png.height,
+    };
+    await window.BPPX.images.uploadPng(projectId, id, png.blob, meta);
+    section.images = section.images || [];
+    // Replace if id already present (used for "替换" flow).
+    const existing = section.images.findIndex((x) => x.id === id);
+    const rec = { id, ...meta };
+    if (existing >= 0) section.images[existing] = rec;
+    else section.images.push(rec);
+    return rec;
+  }
+
+  function imgTile(section, mi) {
+    const meta = section.images[mi];
+    const div = document.createElement("div");
+    div.className = "img-tile";
+    div.innerHTML = `
+      <div class="img-thumb"><img alt="" /></div>
+      <input class="img-cap" value="${escapeHtml(meta.caption || "")}" placeholder="说明（可选）" />
+      <div class="row">
+        <button class="btn img-ins-know">→讲解</button>
+        <button class="btn img-ins-pick">→...</button>
+        <button class="btn img-replace">替换</button>
+        <button class="btn btn-danger img-del">删</button>
+      </div>
+      <input type="file" class="img-replace-file" accept="image/*" hidden />`;
+    const imgEl = div.querySelector("img");
+    window.BPPX.images
+      .fetchImageBlobUrl(projectId, meta.id)
+      .then((u) => {
+        if (u) imgEl.src = u;
+      });
+    div.querySelector(".img-cap").addEventListener("change", (e) => {
+      meta.caption = e.target.value;
+    });
+    div.querySelector(".img-ins-know").addEventListener("click", () =>
+      insertFigureInto(section, "knowledge", null, meta)
+    );
+    div.querySelector(".img-ins-pick").addEventListener("click", () => {
+      const t = pickInsertTarget(section);
+      if (!t) return;
+      insertFigureInto(section, t.kind, t.idx, meta);
+    });
+    const repFile = div.querySelector(".img-replace-file");
+    div.querySelector(".img-replace").addEventListener("click", () =>
+      repFile.click()
+    );
+    repFile.addEventListener("change", async () => {
+      const f = repFile.files[0];
+      if (!f) return;
+      try {
+        await uploadAndRegister(section, f, {
+          id: meta.id,
+          caption: meta.caption,
+          name: meta.name,
+        });
+        renderSections();
+        toast("已替换", "ok");
+      } catch (e) {
+        toast("替换失败：" + e.message, "err");
+      }
+    });
+    div.querySelector(".img-del").addEventListener("click", async () => {
+      if (!confirm("删除该插图（同时清理服务端文件）？")) return;
+      try {
+        await window.BPPX.images.deleteImage(projectId, meta.id);
+      } catch {}
+      section.images.splice(mi, 1);
+      renderSections();
+    });
+    return div;
+  }
+
+  function pickInsertTarget(section) {
+    const opts = ["knowledge"];
+    (section.examples || []).forEach((_, i) => opts.push("example:" + i));
+    (section.exercises || []).forEach((_, i) => opts.push("exercise:" + i));
+    const labels = opts.map((o) => {
+      if (o === "knowledge") return "知识讲解";
+      const [k, i] = o.split(":");
+      return (k === "example" ? "例题 " : "习题 ") + (Number(i) + 1);
+    });
+    const choice = prompt(
+      "选择插入位置（输入序号）：\n" +
+        labels.map((l, i) => i + 1 + ". " + l).join("\n")
+    );
+    const n = Number(choice);
+    if (!n || n < 1 || n > opts.length) return null;
+    const v = opts[n - 1];
+    if (v === "knowledge") return { kind: "knowledge" };
+    const [k, i] = v.split(":");
+    return { kind: k, idx: Number(i) };
+  }
+
+  function insertFigureInto(section, kind, idx, meta) {
+    const snippet = window.BPPX.images.figureSnippet(meta.id, meta.caption);
+    if (kind === "knowledge") {
+      section.knowledge = (section.knowledge || "").trimEnd() + "\n\n" + snippet;
+    } else if (kind === "example") {
+      const ex = (section.examples = section.examples || [])[idx];
+      if (!ex) return toast("例题不存在", "err");
+      ex.q = (ex.q || "").trimEnd() + "\n\n" + snippet;
+    } else if (kind === "exercise") {
+      const ex = (section.exercises = section.exercises || [])[idx];
+      if (!ex) return toast("习题不存在", "err");
+      ex.q = (ex.q || "").trimEnd() + "\n\n" + snippet;
+    }
+    renderSections();
+    toast("已插入", "ok");
   }
   function serializeQA(arr, ansKey) {
     if (!arr || !arr.length) return "";
@@ -699,6 +857,45 @@
       toast("已复制", "ok");
     }
   });
+  $("#exDownloadZip").addEventListener("click", async () => {
+    const out = $("#exOut").value;
+    if (!out) return toast("请先生成", "err");
+    if (typeof JSZip === "undefined")
+      return toast("JSZip 未加载（检查网络/CDN）", "err");
+    if (!projectId) return toast("先输入项目 ID 才能打包图片", "err");
+    const refs = window.BPPX.images.extractRefs(out);
+    const zip = new JSZip();
+    const base = (project.title || "book").replace(/\s+/g, "_");
+    zip.file(base + ".tex", out);
+    const imgs = zip.folder("images");
+    let ok = 0,
+      miss = 0;
+    for (const id of refs) {
+      try {
+        const r = await fetch(window.BPPX.images.imageUrl(projectId, id), {
+          headers: store.loadSettings().shareToken
+            ? { "x-share-token": store.loadSettings().shareToken }
+            : {},
+        });
+        if (!r.ok) {
+          miss++;
+          continue;
+        }
+        const ab = await r.arrayBuffer();
+        imgs.file(id + ".png", ab);
+        ok++;
+      } catch {
+        miss++;
+      }
+    }
+    const blob = await zip.generateAsync({ type: "blob" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = base + ".zip";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toast(`已打包：${ok} 张图${miss ? "（缺失 " + miss + "）" : ""}`, "ok");
+  });
 
   function download(name, content) {
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
@@ -708,6 +905,79 @@
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
+
+  // ----- AI image modal -----
+  function openImgModal(sectionIdx) {
+    imgModalCtx = { sectionIdx, blob: null };
+    $("#imgPrompt").value = "";
+    $("#imgCaption").value = "";
+    $("#imgPreview").innerHTML = "";
+    $("#imgStatus").textContent = "";
+    $("#imgInsert").disabled = true;
+    rebuildImgInsertTargets(project.sections[sectionIdx]);
+    $("#imgModal").hidden = false;
+  }
+  function closeImgModal() {
+    imgModalCtx = null;
+    $("#imgModal").hidden = true;
+  }
+  function rebuildImgInsertTargets(section) {
+    const sel = $("#imgInsertTarget");
+    sel.innerHTML = "";
+    sel.appendChild(new Option("→ 知识讲解末尾", "knowledge"));
+    (section.examples || []).forEach((_, i) =>
+      sel.appendChild(new Option("→ 例题 " + (i + 1), "example:" + i))
+    );
+    (section.exercises || []).forEach((_, i) =>
+      sel.appendChild(new Option("→ 习题 " + (i + 1), "exercise:" + i))
+    );
+  }
+  $("#imgCancel").addEventListener("click", closeImgModal);
+  $("#imgGen").addEventListener("click", async () => {
+    const prompt = $("#imgPrompt").value.trim();
+    if (!prompt) return toast("提示词为空", "err");
+    const status = $("#imgStatus");
+    status.textContent = "AI 生成中...";
+    $("#imgInsert").disabled = true;
+    try {
+      const png = await window.BPPX.images.generate(prompt, {
+        size: $("#imgSize").value,
+      });
+      imgModalCtx.blob = png.blob;
+      imgModalCtx.width = png.width;
+      imgModalCtx.height = png.height;
+      const url = URL.createObjectURL(png.blob);
+      $("#imgPreview").innerHTML =
+        '<img src="' + url + '" alt="预览" />';
+      $("#imgInsert").disabled = false;
+      status.textContent = "✓ 生成完成（点击下方保存并插入）";
+    } catch (e) {
+      status.textContent = "✗ " + e.message;
+    }
+  });
+  $("#imgInsert").addEventListener("click", async () => {
+    if (!imgModalCtx || !imgModalCtx.blob) return;
+    if (!projectId)
+      return toast("先在右上输入项目 ID 并保存一次再生成图", "err");
+    const section = project.sections[imgModalCtx.sectionIdx];
+    if (!section) return toast("章节丢失", "err");
+    try {
+      const meta = await uploadAndRegister(
+        section,
+        new File([imgModalCtx.blob], "ai.png", { type: "image/png" }),
+        { caption: $("#imgCaption").value }
+      );
+      const target = $("#imgInsertTarget").value;
+      if (target === "knowledge") insertFigureInto(section, "knowledge", null, meta);
+      else {
+        const [k, i] = target.split(":");
+        insertFigureInto(section, k, Number(i), meta);
+      }
+      closeImgModal();
+    } catch (e) {
+      toast("保存失败：" + e.message, "err");
+    }
+  });
 
   // ----- init -----
   if (projectId) {

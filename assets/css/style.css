@@ -289,6 +289,84 @@ progress::-moz-progress-bar { background: var(--primary); }
 }
 .proof-suggestion .actions { display: flex; gap: 6px; }
 
+/* ----- image area ----- */
+.img-area {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+.img-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+.img-tile {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.img-thumb {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: #000;
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.img-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.img-tile .img-cap {
+  font-size: 11px;
+  padding: 4px 6px;
+  margin: 0;
+  background: var(--panel-2);
+}
+.img-tile .row { margin: 2px 0; gap: 4px; flex-wrap: wrap; }
+.img-tile .btn { padding: 3px 6px; font-size: 11px; }
+
+/* ----- modal ----- */
+.modal {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+}
+.modal[hidden] { display: none; }
+.modal-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  width: min(620px, 92vw);
+  max-height: 90vh;
+  overflow: auto;
+}
+.modal-card h3 { margin-top: 0; }
+.img-preview {
+  margin: 12px 0;
+  background: #000;
+  border-radius: 6px;
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.img-preview img {
+  max-width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+}
+
 .toast {
   position: fixed;
   bottom: 20px; right: 20px;

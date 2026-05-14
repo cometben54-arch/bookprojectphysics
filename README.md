@@ -28,7 +28,13 @@
    - 选定章节、选定校对目标（知识/例题/习题），并行调用多个 AI 提供商
    - 每条建议含 `位置 / 问题 / 建议 / patch`
    - 一键追加 / 替换 / 忽略
-7. **多人协作**
+7. **图片 / 插图**
+   - 每节带"插图"区，支持上传任意格式（JPG/WEBP/SVG/AVIF/...），浏览器端 Canvas 自动转 PNG 后存到 KV
+   - **AI 文生图**（OpenAI `gpt-image-1`/`dall-e-3`、Gemini `imagen-3.0-generate-001`）
+   - 一键插入到知识讲解末尾、任一例题或习题位置（自动产出 `\begin{figure}...\includegraphics{images/<id>.png}...\end{figure}`）
+   - 任意时刻可上传新图替换旧图（保持同一 id，文中引用不用改）
+   - 导出新增 **ZIP** 模式：`book.tex` + `images/` 目录，解压即可 `xelatex` 编译
+8. **多人协作**
    - 顶部输入「项目 ID」+ 后台「共享 Token」即可在 Cloudflare KV 中共享同一项目
    - 本地 localStorage 兜底；保存/载入自动取最新
 
@@ -81,6 +87,7 @@ npm run dev      # wrangler pages dev
 │   └── js/
 │       ├── storage.js        # 本地 + 远端项目存储
 │       ├── ai-client.js      # 浏览器侧 AI 调用封装（通过本站代理）
+│       ├── images.js         # 图片上传 / Canvas 转 PNG / AI 文生图 / 插入
 │       ├── latex.js          # preamble 构建 + 合并器
 │       ├── app.js            # 主页所有逻辑
 │       └── settings-page.js  # 后台齿轮逻辑
@@ -92,11 +99,13 @@ npm run dev      # wrangler pages dev
 │       │   ├── generate.js   # 生成内容
 │       │   ├── parse.js      # 解析参考资料（含 PDF/URL）
 │       │   ├── proofread.js  # 校对
+│       │   ├── image.js      # 文生图（OpenAI / Gemini）
 │       │   └── test.js       # 提供商连通性
 │       ├── latex/merge.js    # 服务端 LaTeX 合并（备用）
 │       └── store/
 │           ├── settings.js   # 全局设置 KV 读写
-│           └── project.js    # 项目数据 KV 读写
+│           ├── project.js    # 项目数据 KV 读写
+│           └── image.js      # 二进制图片 KV 读写
 ├── wrangler.toml
 ├── _headers
 └── _redirects

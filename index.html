@@ -191,6 +191,7 @@
       <div class="row">
         <button id="exBuild" class="btn btn-primary">生成 LaTeX</button>
         <button id="exDownload" class="btn">下载 .tex</button>
+        <button id="exDownloadZip" class="btn">下载 ZIP（.tex + images/）</button>
         <button id="exCopy" class="btn">复制</button>
       </div>
       <textarea id="exOut" rows="24" placeholder="点击生成 LaTeX，输出会在此处。"></textarea>
@@ -198,10 +199,52 @@
   </section>
 </main>
 
+<!-- AI image generation modal -->
+<div id="imgModal" class="modal" hidden>
+  <div class="modal-card">
+    <h3>AI 文生图</h3>
+    <label>提示词
+      <textarea id="imgPrompt" rows="4" placeholder="例：一个木块沿着倾角 30 度的斜面下滑，标注重力分量、摩擦力、支持力，简洁示意图"></textarea>
+    </label>
+    <div class="row">
+      <label class="grow">尺寸
+        <select id="imgSize">
+          <option value="1024x1024">1024×1024（方）</option>
+          <option value="1536x1024">1536×1024（横）</option>
+          <option value="1024x1536">1024×1536（竖）</option>
+        </select>
+      </label>
+      <label class="grow">说明 (caption)
+        <input id="imgCaption" placeholder="图1：斜面受力分析" />
+      </label>
+    </div>
+    <div class="row">
+      <button id="imgGen" class="btn btn-primary">生成</button>
+      <button id="imgCancel" class="btn">取消</button>
+      <span id="imgStatus" class="muted small"></span>
+    </div>
+    <div id="imgPreview" class="img-preview"></div>
+    <div class="row">
+      <button id="imgInsert" class="btn btn-primary" disabled>保存并插入到当前节</button>
+      <select id="imgInsertTarget">
+        <option value="knowledge">→ 知识讲解末尾</option>
+        <option value="example0">→ 例题 1</option>
+        <option value="example1">→ 例题 2</option>
+        <option value="example2">→ 例题 3</option>
+        <option value="exercise0">→ 习题 1</option>
+        <option value="exercise1">→ 习题 2</option>
+        <option value="exercise2">→ 习题 3</option>
+      </select>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="toast"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="/assets/js/storage.js"></script>
 <script src="/assets/js/ai-client.js"></script>
+<script src="/assets/js/images.js"></script>
 <script src="/assets/js/latex.js"></script>
 <script src="/assets/js/app.js"></script>
 </body>
