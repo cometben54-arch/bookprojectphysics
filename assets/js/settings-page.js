@@ -369,15 +369,28 @@
       if (!r.ok) return;
       const remote = await r.json();
       if (!remote || !remote.providers) return;
-      // Preserve local-only API keys for matching provider names.
-      const oldByName = Object.fromEntries(
+      // Union providers by name. Remote wins on most fields, but a missing
+      // key always falls back to the local copy, and a provider that only
+      // exists locally (added but not yet saved) is never dropped.
+      const localByName = Object.fromEntries(
         (settings.providers || []).map((p) => [p.name, p])
       );
-      remote.providers = (remote.providers || []).map((p) => {
-        if (!p.key && oldByName[p.name]) p.key = oldByName[p.name].key;
-        return p;
+      const remoteByName = Object.fromEntries(
+        (remote.providers || []).map((p) => [p.name, p])
+      );
+      const allNames = [
+        ...new Set([
+          ...Object.keys(localByName),
+          ...Object.keys(remoteByName),
+        ]),
+      ];
+      const mergedProviders = allNames.map((name) => {
+        const l = localByName[name];
+        const rp = remoteByName[name];
+        if (l && rp) return { ...l, ...rp, key: rp.key || l.key || "" };
+        return rp || l;
       });
-      settings = { ...settings, ...remote };
+      settings = { ...settings, ...remote, providers: mergedProviders };
       store.saveSettings(settings);
       markAllSaved();
       render();
