@@ -88,15 +88,16 @@
     tpl.querySelector(".p-del").addEventListener("click", async () => {
       if (!confirm("删除此提供商？")) return;
       settings.providers.splice(idx, 1);
-      persist();
+      await persist();
       render();
     });
     tpl.querySelector(".p-test").addEventListener("click", async () => {
       const status = root.querySelector(".p-status");
-      status.textContent = "测试中...";
+      status.textContent = "保存配置中...";
       status.style.color = "";
       try {
-        persist();
+        await persist();
+        status.textContent = "测试中...";
         const res = await fetch("/api/ai/test", {
           method: "POST",
           headers: {
@@ -151,7 +152,7 @@
     $("#defImage").value = settings.image || $("#defImage").value;
   }
 
-  function persist() {
+  async function persist() {
     settings.timeout = Number($("#defTimeout").value) || 120;
     settings.concurrency = Number($("#defConcurrency").value) || 2;
     settings.write = $("#defWrite").value;
@@ -164,26 +165,33 @@
     settings.sysProof = $("#defSysProof").value;
     settings.shareToken = $("#shareToken").value.trim();
     store.saveSettings(settings);
-    // Push to server too so coworkers can pull these via the token.
-    if (settings.shareToken) {
-      fetch("/api/store/settings", {
+    // Always push to server so /api/ai/test etc. can find providers by name.
+    // Bootstrap PUT is accepted when the server has no shareToken yet.
+    const headers = { "content-type": "application/json" };
+    if (settings.shareToken) headers["x-share-token"] = settings.shareToken;
+    try {
+      const r = await fetch("/api/store/settings", {
         method: "PUT",
-        headers: {
-          "content-type": "application/json",
-          "x-share-token": settings.shareToken,
-        },
+        headers,
         body: JSON.stringify(settings),
-      }).catch(() => {});
+      });
+      if (!r.ok) {
+        const t = await r.text().catch(() => "");
+        console.warn("settings push failed:", r.status, t);
+      }
+    } catch (e) {
+      console.warn("settings push error:", e);
     }
   }
 
-  $("#addProvider").addEventListener("click", () => {
+  $("#addProvider").addEventListener("click", async () => {
     settings.providers = settings.providers || [];
     settings.providers.push(newProvider());
-    persist();
+    await persist();
     render();
   });
   $("#testAll").addEventListener("click", async () => {
+    await persist();
     for (const p of settings.providers || []) {
       try {
         const r = await fetch("/api/ai/test", {
@@ -207,12 +215,12 @@
       }
     }
   });
-  $("#saveDefaults").addEventListener("click", () => {
-    persist();
+  $("#saveDefaults").addEventListener("click", async () => {
+    await persist();
     toast("已保存默认配置", "ok");
   });
-  $("#saveShare").addEventListener("click", () => {
-    persist();
+  $("#saveShare").addEventListener("click", async () => {
+    await persist();
     toast("已保存共享 Token", "ok");
   });
 
