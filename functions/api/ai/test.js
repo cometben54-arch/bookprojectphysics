@@ -3,6 +3,7 @@ import {
   error,
   authorize,
   findProvider,
+  describeMissingProvider,
   aiComplete,
 } from "../../_shared.js";
 
@@ -13,7 +14,10 @@ export const onRequestPost = async ({ request, env }) => {
   const body = await request.json().catch(() => ({}));
   const provider = findProvider(auth.settings, body.provider);
   if (!provider)
-    return json({ ok: false, error: "未保存或未找到该提供商: " + body.provider });
+    return json({
+      ok: false,
+      error: describeMissingProvider(auth.settings, body.provider, env),
+    });
 
   try {
     const r = await aiComplete({

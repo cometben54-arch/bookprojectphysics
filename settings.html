@@ -18,6 +18,13 @@
 </header>
 
 <main class="settings-main">
+  <div id="kvWarning" class="kv-warning" hidden>
+    ⚠ <strong>未检测到 KV 绑定（BOOK_KV）。</strong>
+    此时设置只存在单个 Worker 实例的内存里，无法跨请求/跨实例保存 ——
+    会出现「测试通过但生成时报『提供商未配置』」的问题。
+    请到 Cloudflare Pages 项目 → Settings → Bindings 添加名为
+    <code>BOOK_KV</code> 的 KV namespace，然后重新部署并重新保存设置。
+  </div>
   <section class="card">
     <h3>AI 服务提供商</h3>
     <p class="muted small">在此添加一个或多个 AI 提供商（OpenAI / Anthropic / DeepSeek / 任意 OpenAI 兼容接口）。所有调用通过本站 Pages Functions 代理，避免在前端暴露 Key。Key 存放在 Cloudflare KV（若已配置 BOOK_KV）或浏览器 localStorage。</p>
