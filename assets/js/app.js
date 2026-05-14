@@ -19,6 +19,54 @@
     setTimeout(() => (t.className = "toast"), 2600);
   }
 
+  // Resolve which provider to use for a given role. Falls back to the first
+  // configured provider when the explicit default hasn't been set, so users
+  // don't HAVE to visit the 默认调用 section before generating anything.
+  function resolveProvider(role) {
+    const s = store.loadSettings();
+    const providers = s.providers || [];
+    const first = providers[0] && providers[0].name;
+    if (role === "write") return s.write || first || "";
+    if (role === "parse") return s.parse || s.write || first || "";
+    if (role === "image") return s.image || first || "";
+    return s.write || first || "";
+  }
+  // Proofread can use several providers; fall back to all configured ones.
+  function resolveProofProviders() {
+    const s = store.loadSettings();
+    const chosen = (s.proof || []).filter(Boolean);
+    if (chosen.length) return chosen;
+    return (s.providers || []).map((p) => p.name).filter(Boolean);
+  }
+
+  // Pull global settings (providers + defaults) from the server so a fresh
+  // browser — or one where only the settings page was used — still knows
+  // about configured providers. Best-effort; localStorage is the fallback.
+  async function bootstrapSettingsFromRemote() {
+    try {
+      const local = store.loadSettings();
+      const headers = local.shareToken
+        ? { "x-share-token": local.shareToken }
+        : {};
+      const r = await fetch("/api/store/settings", { headers });
+      if (!r.ok) return;
+      const remote = await r.json();
+      if (!remote || !remote.providers) return;
+      const merged = { ...local, ...remote };
+      // Keep a local API key if the remote one is blank for the same name.
+      const localByName = Object.fromEntries(
+        (local.providers || []).map((p) => [p.name, p])
+      );
+      merged.providers = (remote.providers || []).map((p) => {
+        if (!p.key && localByName[p.name]) p.key = localByName[p.name].key;
+        return p;
+      });
+      store.saveSettings(merged);
+    } catch {
+      // offline / no KV — fine, localStorage stands
+    }
+  }
+
   // ----- tab switching -----
   $$(".tab").forEach((b) =>
     b.addEventListener("click", () => {
@@ -141,9 +189,9 @@
     }
     if (!payload) return toast("参考内容为空", "err");
 
-    const settings = store.loadSettings();
-    const provider = settings.parse || settings.write;
-    if (!provider) return toast("请先到设置选择「解析」提供商", "err");
+    const provider = resolveProvider("parse");
+    if (!provider)
+      return toast("还没有配置任何 AI 提供商，请点右上角 ⚙ 添加", "err");
     status.textContent = "AI 解析中...";
     try {
       const res = await ai.parseRef({ provider, kind, payload });
@@ -438,8 +486,9 @@
   $("#genAll").addEventListener("click", async () => {
     pullFromUI();
     const settings = store.loadSettings();
-    const provider = settings.write;
-    if (!provider) return toast("请先到设置选择「写作」提供商", "err");
+    const provider = resolveProvider("write");
+    if (!provider)
+      return toast("还没有配置任何 AI 提供商，请点右上角 ⚙ 添加", "err");
 
     const lines = $("#bookOutline")
       .value.split("\n")
@@ -499,8 +548,8 @@
   async function generateSection(idx) {
     pullFromUI();
     const settings = store.loadSettings();
-    const provider = settings.write;
-    if (!provider) throw new Error("未选择写作提供商");
+    const provider = resolveProvider("write");
+    if (!provider) throw new Error("还没有配置任何 AI 提供商");
     const s = project.sections[idx];
     const unit = $("#genUnit").value;
     const words = $("#genWords").value;
@@ -665,8 +714,9 @@
   $("#proofRun").addEventListener("click", async () => {
     pullFromUI();
     const settings = store.loadSettings();
-    const providers = settings.proof || [];
-    if (!providers.length) return toast("请先到设置选择校对提供商", "err");
+    const providers = resolveProofProviders();
+    if (!providers.length)
+      return toast("还没有配置任何 AI 提供商，请点右上角 ⚙ 添加", "err");
     const targets = $$(".proof-target:checked").map((c) => c.value);
     if (!targets.length) return toast("至少选一项校对目标", "err");
     const which = $("#proofSection").value;
@@ -937,11 +987,15 @@
   $("#imgGen").addEventListener("click", async () => {
     const prompt = $("#imgPrompt").value.trim();
     if (!prompt) return toast("提示词为空", "err");
+    const provider = resolveProvider("image");
+    if (!provider)
+      return toast("还没有配置任何 AI 提供商，请点右上角 ⚙ 添加", "err");
     const status = $("#imgStatus");
     status.textContent = "AI 生成中...";
     $("#imgInsert").disabled = true;
     try {
       const png = await window.BPPX.images.generate(prompt, {
+        provider,
         size: $("#imgSize").value,
       });
       imgModalCtx.blob = png.blob;
@@ -1099,7 +1153,7 @@
       batchSize: Number($("#pdfBatch").value) || 1,
       autoMode: $("#pdfAuto").checked,
       style: $("#pdfStyle").value,
-      provider: store.loadSettings().write,
+      provider: resolveProvider("write"),
       onUpdate: pdfRender,
       onBatchPause: () => toast("本批完成，已暂停 — 点继续下一批", "ok"),
       onFinish: () =>
@@ -1129,7 +1183,7 @@
           batchSize: Number($("#pdfBatch").value) || project.pdf.batchSize || 1,
           autoMode: $("#pdfAuto").checked,
           style: $("#pdfStyle").value || project.pdf.style,
-          provider: store.loadSettings().write,
+          provider: resolveProvider("write"),
           onUpdate: pdfRender,
           onBatchPause: () => toast("本批完成，已暂停 — 点继续下一批", "ok"),
           onFinish: () => toast("✓ 全部完成", "ok"),
@@ -1149,9 +1203,12 @@
     pdfJob.batchSize = Number($("#pdfBatch").value) || 1;
     pdfJob.autoMode = $("#pdfAuto").checked;
     pdfJob.style = $("#pdfStyle").value;
-    pdfJob.provider = store.loadSettings().write;
+    pdfJob.provider = resolveProvider("write");
     if (!pdfJob.provider)
-      return toast("请先到设置选择「写作」提供商", "err");
+      return toast(
+        "还没有配置任何 AI 提供商。点右上角 ⚙ 进入设置，添加并保存一个提供商。",
+        "err"
+      );
 
     $("#pdfPause").disabled = false;
     $("#pdfRun").disabled = true;
@@ -1205,7 +1262,7 @@
         batchSize: project.pdf.batchSize || 1,
         autoMode: project.pdf.autoMode,
         style: project.pdf.style || "rewrite",
-        provider: store.loadSettings().write,
+        provider: resolveProvider("write"),
         onUpdate: pdfRender,
         onBatchPause: () => toast("本批完成", "ok"),
         onFinish: () => toast("✓ 全部完成", "ok"),
@@ -1224,4 +1281,7 @@
     if (local) project = { ...store.emptyProject(), ...local };
   }
   bindToUI();
+  // Pull provider config from the server (best-effort) so a fresh browser,
+  // or one where config was only entered on the settings page, still works.
+  bootstrapSettingsFromRemote();
 })();
