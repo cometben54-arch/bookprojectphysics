@@ -48,41 +48,61 @@
 
 ## 部署到 Cloudflare Pages
 
-### 1. 在 Cloudflare Dashboard 创建 KV namespace
+> **重要：本项目不含 `wrangler.toml`。** 这是刻意的 —— 只要项目里存在
+> `wrangler.toml`，Cloudflare 就会**完全忽略 Dashboard 里配置的 binding**，
+> 以该文件为准。删掉它之后，你才能在 Cloudflare 网页界面里正常配置 KV
+> binding。请不要再把 `wrangler.toml` 加回来。
+
+### 1. 创建 KV namespace
+
+Cloudflare Dashboard → **Storage & Databases → KV → Create a namespace**，
+名字随意（例如 `bookprojectphysics-kv`）。
+
+或用命令行：
 
 ```
-wrangler kv:namespace create BOOK_KV
+npx wrangler kv namespace create BOOK_KV
 ```
-
-复制返回的 `id`，填入 `wrangler.toml` 中 `REPLACE_WITH_REAL_KV_ID` 的位置。
 
 ### 2. 关联到 Pages 项目
 
-在 Cloudflare Dashboard：
+1. **Workers & Pages → Create → Pages → Connect to Git**，选择本仓库
+2. 构建命令（Build command）：留空
+3. 构建输出目录（Build output directory）：`/`
+4. 部署一次
 
-1. **Pages → Create project → Connect to Git**，选择本仓库
-2. 构建命令：留空（纯静态）
-3. 输出目录：`/`
-4. **Settings → Functions → KV namespace bindings**：添加 `BOOK_KV` 绑定到上一步创建的 namespace
-5. 部署
+### 3. 绑定 KV（关键步骤）
 
-### 3. 第一次访问
+项目 → **Settings → Bindings → Add → KV namespace**：
 
-1. 打开站点首页，点击右上角齿轮 `⚙` 进入设置
+- **Variable name**：`BOOK_KV`（必须完全一致，区分大小写）
+- **KV namespace**：选第 1 步创建的那个
+
+保存后，到 **Deployments** 重新部署一次（Retry deployment），让 binding 生效。
+
+> 验证：访问 `https://<你的域名>/api/health`，返回 `{"ok":true,"kv":true,...}`
+> 中的 **`kv:true`** 才说明绑定成功。设置页顶部若出现红色 KV 警告横幅，
+> 说明还没绑好。
+
+### 4. 第一次访问
+
+1. 打开站点首页，点右上角齿轮 `⚙` 进入设置
 2. **首次保存** 时设置一个共享 Token —— 之后服务端会要求所有调用携带此 Token
-3. 添加 AI 提供商，点击「测试」确认连通性
-4. 回到主页，输入项目 ID（任意字符串，团队约定），开始写作
+3. 添加 AI 提供商，点「保存」「测试」
+4. 回主页，输入项目 ID（任意字符串，团队约定），开始写作
 
-> 即使没有配置 KV，前端也能用 localStorage 单机使用；只是同事之间无法共享。
+> 即使没有配置 KV，前端也能用 localStorage 单机使用；但 AI 调用会因为
+> 设置无法跨请求保存而报「提供商未配置」，所以**生产部署务必绑定 KV**。
 
 ## 本地开发
 
 ```bash
 npm install
-npm run dev      # wrangler pages dev
+npm run dev      # wrangler pages dev . --kv BOOK_KV
 ```
 
-打开 `http://127.0.0.1:8788`。本地未绑定 KV 时使用内存兜底，重启会丢数据。
+打开 `http://127.0.0.1:8788`。本地 `--kv BOOK_KV` 会创建一个本地 KV，
+数据存在 `.wrangler/` 里。
 
 ## 目录结构
 
@@ -115,10 +135,11 @@ npm run dev      # wrangler pages dev
 │           ├── settings.js   # 全局设置 KV 读写
 │           ├── project.js    # 项目数据 KV 读写
 │           └── image.js      # 二进制图片 KV 读写
-├── wrangler.toml
 ├── _headers
 └── _redirects
 ```
+
+> 注意：本项目**故意不包含 `wrangler.toml`**。见上方「部署」一节的说明。
 
 ## 工作流示例
 
