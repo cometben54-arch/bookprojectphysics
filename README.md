@@ -130,7 +130,8 @@ npm run dev      # wrangler pages dev
 
 ## 安全提示
 
-- API Key 通过 `/api/store/settings` 存入 Cloudflare KV，仅在服务端被读取后用于调用第三方 AI；浏览器代码不会拿到原始 Key（GET 接口已剥除）
+- API Key 通过 `/api/store/settings` 存入 Cloudflare KV。所有第三方 AI 调用都在服务端（Pages Functions）发起，浏览器只发送提供商名字、不直接持有 Key 去打第三方接口
+- `GET /api/store/settings` 会把 Key 一并返回给**已通过共享 Token 鉴权**的客户端（设置页需要它来回显/编辑配置而不必每次重输 Key）。安全模型是：**共享 Token 即凭证** —— 持有 Token 的人本来就能通过代理使用所有 Key，因此能读到 Key 本身并不构成额外的权限提升
 - 设置共享 Token 后，所有 `/api/*` 端点都需要 `x-share-token` 才能调用；同事必须从你这里拿到 Token 才能加入
 - 首次保存设置时 Token 为空可作为「引导」，请尽快设置 Token 防止被陌生人调用
 
