@@ -13,36 +13,109 @@
 
 (function (global) {
   const PDFJS_VER = "3.11.174";
-  const PDFJS_BASE =
-    "https://cdn.jsdelivr.net/npm/pdfjs-dist@" + PDFJS_VER + "/legacy/build/";
+  // Try multiple CDNs in order. cdnjs is on Cloudflare's network (same as
+  // this site, and reachable from mainland China where jsdelivr is flaky).
+  // Each entry is a {lib, worker} pair; whichever one successfully exposes
+  // window.pdfjsLib wins, and its worker URL is used.
+  const PDFJS_SOURCES = [
+    {
+      lib:
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/" +
+        PDFJS_VER +
+        "/pdf.min.js",
+      worker:
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/" +
+        PDFJS_VER +
+        "/pdf.worker.min.js",
+    },
+    {
+      lib:
+        "https://cdn.jsdelivr.net/npm/pdfjs-dist@" +
+        PDFJS_VER +
+        "/legacy/build/pdf.min.js",
+      worker:
+        "https://cdn.jsdelivr.net/npm/pdfjs-dist@" +
+        PDFJS_VER +
+        "/legacy/build/pdf.worker.min.js",
+    },
+    {
+      lib:
+        "https://cdn.jsdelivr.net/npm/pdfjs-dist@" +
+        PDFJS_VER +
+        "/legacy/build/pdf.js",
+      worker:
+        "https://cdn.jsdelivr.net/npm/pdfjs-dist@" +
+        PDFJS_VER +
+        "/legacy/build/pdf.worker.js",
+    },
+    {
+      lib:
+        "https://unpkg.com/pdfjs-dist@" +
+        PDFJS_VER +
+        "/legacy/build/pdf.min.js",
+      worker:
+        "https://unpkg.com/pdfjs-dist@" +
+        PDFJS_VER +
+        "/legacy/build/pdf.worker.min.js",
+    },
+  ];
+
+  function loadScript(url) {
+    return new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = url;
+      s.onload = () => res();
+      s.onerror = () => rej(new Error("加载失败"));
+      document.head.appendChild(s);
+    });
+  }
 
   let loading = null;
   function ensurePdfJs() {
-    if (global.pdfjsLib) return Promise.resolve(global.pdfjsLib);
+    if (global.pdfjsLib && global.pdfjsLib.getDocument)
+      return Promise.resolve(global.pdfjsLib);
     if (loading) return loading;
-    loading = new Promise((res, rej) => {
-      const s = document.createElement("script");
-      s.src = PDFJS_BASE + "pdf.min.js";
-      s.onload = () => {
+    loading = (async () => {
+      const errs = [];
+      for (const src of PDFJS_SOURCES) {
         try {
-          global.pdfjsLib.GlobalWorkerOptions.workerSrc =
-            PDFJS_BASE + "pdf.worker.min.js";
-          res(global.pdfjsLib);
-        } catch (e) {
-          rej(e);
+          await loadScript(src.lib);
+          if (global.pdfjsLib && global.pdfjsLib.getDocument) {
+            global.pdfjsLib.GlobalWorkerOptions.workerSrc = src.worker;
+            return global.pdfjsLib;
+          }
+          errs.push(src.lib + "（已加载但未暴露 pdfjsLib）");
+        } catch {
+          errs.push(src.lib + "（网络/404）");
         }
-      };
-      s.onerror = () => rej(new Error("无法加载 pdf.js（检查网络/CDN）"));
-      document.head.appendChild(s);
-    });
+      }
+      loading = null; // allow a later retry
+      throw new Error(
+        "无法加载 pdf.js，已尝试 " +
+          PDFJS_SOURCES.length +
+          " 个 CDN 均失败：\n" +
+          errs.join("\n") +
+          "\n（可能是网络被拦截，或公司网络屏蔽了 CDN）"
+      );
+    })();
     return loading;
   }
 
   async function extractPdfText(file, onProgress) {
     const lib = await ensurePdfJs();
     const buf = await file.arrayBuffer();
-    const doc = await lib.getDocument({ data: buf }).promise;
+    let doc;
+    try {
+      doc = await lib.getDocument({ data: buf }).promise;
+    } catch (e) {
+      throw new Error(
+        "PDF 打开失败：" +
+          (e && e.message ? e.message : e) +
+          "（可能是加密 PDF、文件损坏，或不是有效的 PDF）"
+      );
+    }
     const pages = [];
+    let totalChars = 0;
     for (let i = 1; i <= doc.numPages; i++) {
       const p = await doc.getPage(i);
       const tc = await p.getTextContent();
@@ -60,8 +133,20 @@
         lastY = y;
       }
       if (line.length) lines.push(line.join(" "));
-      pages.push(lines.join("\n"));
+      const pageText = lines.join("\n");
+      totalChars += pageText.replace(/\s/g, "").length;
+      pages.push(pageText);
       if (onProgress) onProgress(i, doc.numPages);
+    }
+    if (totalChars < 20) {
+      throw new Error(
+        "未能从该 PDF 提取到文字（共 " +
+          doc.numPages +
+          " 页，提取到 " +
+          totalChars +
+          " 个非空白字符）。" +
+          "该 PDF 很可能是扫描版 —— 每页是图片、没有文字层，需要先做 OCR 才能翻译。"
+      );
     }
     return { pages, numPages: doc.numPages };
   }
