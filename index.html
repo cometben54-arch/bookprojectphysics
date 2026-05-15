@@ -95,6 +95,19 @@
       </div>
       <div id="sectionList" class="section-list"></div>
     </div>
+
+    <div class="card">
+      <h3>4. 一键合并为整本书</h3>
+      <p class="muted small">把当前所有章节（知识讲解 + 例题 + 解析 + 习题 + 答案）按顺序拼接，加上模板设置的 preamble，生成一个可直接 <code>xelatex</code> 编译的完整 .tex。</p>
+      <div class="row">
+        <button id="wBuild" class="btn btn-primary">生成预览</button>
+        <button id="wDownload" class="btn">下载 .tex</button>
+        <button id="wDownloadZip" class="btn">下载 ZIP（.tex + images/）</button>
+        <button id="wCopy" class="btn">复制</button>
+        <span id="wStatus" class="muted small"></span>
+      </div>
+      <textarea id="wOut" rows="18" placeholder="点击「生成预览」，完整 .tex 会显示在此。"></textarea>
+    </div>
   </section>
 
   <!-- ============== PDF 翻译 ============== -->

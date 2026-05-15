@@ -948,6 +948,73 @@
     toast(`已打包：${ok} 张图${miss ? "（缺失 " + miss + "）" : ""}`, "ok");
   });
 
+  // ----- inline merge-and-download on the 写作 tab -----
+  function buildAndShowFull() {
+    pullFromUI();
+    if (!project.sections || !project.sections.length) {
+      toast("还没有章节内容，先生成或新增章节", "err");
+      return "";
+    }
+    const out = tex.buildFull(project);
+    $("#wOut").value = out;
+    $("#wStatus").textContent =
+      "✓ 已生成 " + project.sections.length + " 节，共 " +
+      out.length.toLocaleString() + " 字符";
+    return out;
+  }
+  $("#wBuild").addEventListener("click", () => buildAndShowFull());
+  $("#wDownload").addEventListener("click", () => {
+    const out = $("#wOut").value || buildAndShowFull();
+    if (!out) return;
+    download((project.title || "book") + ".tex", out);
+  });
+  $("#wCopy").addEventListener("click", async () => {
+    const out = $("#wOut").value || buildAndShowFull();
+    if (!out) return;
+    try {
+      await navigator.clipboard.writeText(out);
+      toast("已复制到剪贴板", "ok");
+    } catch {
+      $("#wOut").select();
+      document.execCommand("copy");
+      toast("已复制", "ok");
+    }
+  });
+  $("#wDownloadZip").addEventListener("click", async () => {
+    const out = $("#wOut").value || buildAndShowFull();
+    if (!out) return;
+    if (typeof JSZip === "undefined")
+      return toast("JSZip 未加载（检查网络/CDN）", "err");
+    if (!projectId) return toast("先输入项目 ID 才能打包图片", "err");
+    const refs = window.BPPX.images.extractRefs(out);
+    const zip = new JSZip();
+    const base = (project.title || "book").replace(/\s+/g, "_");
+    zip.file(base + ".tex", out);
+    const imgs = zip.folder("images");
+    const tok = store.loadSettings().shareToken;
+    let ok = 0, miss = 0;
+    for (const id of refs) {
+      try {
+        const r = await fetch(window.BPPX.images.imageUrl(projectId, id), {
+          headers: tok ? { "x-share-token": tok } : {},
+        });
+        if (!r.ok) { miss++; continue; }
+        const ab = await r.arrayBuffer();
+        imgs.file(id + ".png", ab);
+        ok++;
+      } catch {
+        miss++;
+      }
+    }
+    const blob = await zip.generateAsync({ type: "blob" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = base + ".zip";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toast(`已打包：${ok} 张图${miss ? "（缺失 " + miss + "）" : ""}`, "ok");
+  });
+
   function download(name, content) {
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const a = document.createElement("a");
